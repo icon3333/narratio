@@ -30,6 +30,7 @@ dev = [
 
 [project.scripts]
 narratio = "narratio.pipeline:main"
+narratio-app = "narratio._run_app:main"
 
 [build-system]
 requires = ["hatchling"]

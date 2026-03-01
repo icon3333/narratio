@@ -1,4 +1,5 @@
-import os
+from unittest.mock import patch
+
 
 def test_config_loads_from_env(monkeypatch):
     monkeypatch.setenv("FINNHUB_API_KEY", "test-finnhub")
@@ -17,5 +18,7 @@ def test_config_raises_on_missing_keys(monkeypatch):
 
     from narratio.config import get_config
     import pytest
-    with pytest.raises(ValueError, match="FINNHUB_API_KEY"):
-        get_config()
+
+    with patch("narratio.config.load_dotenv"):  # prevent .env from re-loading keys
+        with pytest.raises(ValueError, match="FINNHUB_API_KEY"):
+            get_config()
