@@ -1,0 +1,73 @@
+"""SQLite database initialization and helpers."""
+
+import sqlite3
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS articles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    finnhub_id INTEGER UNIQUE NOT NULL,
+    headline TEXT NOT NULL,
+    summary TEXT,
+    source TEXT,
+    url TEXT,
+    published_at INTEGER NOT NULL,
+    related_tickers TEXT,
+    category TEXT,
+    ingested_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS article_analysis (
+    article_id INTEGER PRIMARY KEY REFERENCES articles(id),
+    embedding_index INTEGER,
+    sentiment_score REAL,
+    sentiment_label TEXT,
+    cluster_id INTEGER,
+    narrative_id INTEGER REFERENCES narratives(id)
+);
+
+CREATE TABLE IF NOT EXISTS narratives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    centroid_embedding_index INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS narrative_weeks (
+    narrative_id INTEGER NOT NULL REFERENCES narratives(id),
+    week_start TEXT NOT NULL,
+    article_count INTEGER NOT NULL DEFAULT 0,
+    share_of_attention REAL,
+    z_score REAL,
+    sentiment_mean REAL,
+    summary TEXT,
+    top_headline_ids TEXT,
+    PRIMARY KEY (narrative_id, week_start)
+);
+
+CREATE TABLE IF NOT EXISTS weekly_totals (
+    week_start TEXT PRIMARY KEY,
+    total_articles INTEGER NOT NULL DEFAULT 0,
+    total_clustered INTEGER NOT NULL DEFAULT 0,
+    total_noise INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
+def init_db(db_path: str) -> None:
+    """Create database and tables if they don't exist."""
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.executescript(SCHEMA)
+    conn.close()
+
+
+def get_connection(db_path: str) -> sqlite3.Connection:
+    """Return a configured SQLite connection with WAL mode and foreign keys."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
