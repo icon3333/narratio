@@ -11,6 +11,9 @@ dependencies = [
     "scikit-learn>=1.5",
     "python-dotenv>=1.0",
     "rich>=13.0",
+    "streamlit>=1.41",
+    "plotly>=6.0",
+    "pandas>=2.2",
 ]
 
 [project.optional-dependencies]
