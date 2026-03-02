@@ -31,8 +31,8 @@ def _seed_db(db_path):
     for i in range(6):
         nar_id = 1 if i < 3 else 2
         conn.execute(
-            "INSERT INTO articles (finnhub_id, headline, summary, source, url, published_at, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (i, f"Headline {i} for narrative {nar_id}", f"Summary {i}", "reuters", "http://example.com", 1733011200 + i * 86400, "general"),
+            "INSERT INTO articles (nyt_id, headline, summary, source, url, published_at, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (f"nyt-{i}", f"Headline {i} for narrative {nar_id}", f"Summary {i}", "reuters", "http://example.com", f"2025-12-{1 + i:02d}T00:00:00Z", "general"),
         )
         conn.execute(
             "INSERT INTO article_analysis (article_id, narrative_id, sentiment_score, sentiment_label) VALUES (?, ?, ?, ?)",

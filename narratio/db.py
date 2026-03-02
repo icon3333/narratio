@@ -6,14 +6,16 @@ from pathlib import Path
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    finnhub_id INTEGER UNIQUE NOT NULL,
+    nyt_id TEXT UNIQUE NOT NULL,
     headline TEXT NOT NULL,
     summary TEXT,
     source TEXT,
     url TEXT,
-    published_at INTEGER NOT NULL,
-    related_tickers TEXT,
+    published_at TEXT NOT NULL,
+    keywords TEXT,
     category TEXT,
+    news_desk TEXT,
+    word_count INTEGER,
     ingested_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
