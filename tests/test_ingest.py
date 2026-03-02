@@ -29,7 +29,7 @@ def _make_nyt_article(id="nyt://article/test-1", headline="Test Headline", secti
 def test_parse_nyt_article():
     raw = _make_nyt_article()
     parsed = parse_nyt_article(raw)
-    assert parsed["nyt_id"] == "nyt://article/test-1"
+    assert parsed["source_id"] == "nyt://article/test-1"
     assert parsed["headline"] == "Test Headline"
     assert parsed["summary"] == "Test abstract"
     assert parsed["published_at"] == "2025-06-15T10:30:00+0000"

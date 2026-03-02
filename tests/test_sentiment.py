@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 from narratio.db import init_db, get_connection
 from narratio.sentiment import analyze_sentiment, _parse_sentiment_response
 
@@ -24,7 +24,7 @@ def test_analyze_sentiment_updates_db(tmp_path):
 
     for i in range(3):
         conn.execute(
-            """INSERT INTO articles (nyt_id, headline, summary, source, url, published_at, category)
+            """INSERT INTO articles (source_id, headline, summary, source, url, published_at, category)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (f"nyt-{i}", f"Headline {i}", f"Summary {i}", "test", "http://test.com", "2025-12-01T00:00:00+0000", "general"),
         )
@@ -39,8 +39,8 @@ def test_analyze_sentiment_updates_db(tmp_path):
         "choices": [{"message": {"content": '{"score": 0.5, "label": "bullish"}'}}]
     }
 
-    with patch("narratio.sentiment._call_openrouter_chat") as mock_call:
-        mock_call.return_value = fake_response
+    mock_call = AsyncMock(return_value=fake_response)
+    with patch("narratio.sentiment._call_openrouter_chat_async", mock_call):
         count = analyze_sentiment(db_path, "fake-key", batch_size=10)
 
     assert count == 3

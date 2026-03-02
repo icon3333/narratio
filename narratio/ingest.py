@@ -1,9 +1,13 @@
 """NYT Archive API ingestion."""
 
 import json
+import logging
+import sqlite3
 import time
 import httpx
 from narratio.db import get_connection
+
+logger = logging.getLogger(__name__)
 
 NYT_ARCHIVE_URL = "https://api.nytimes.com/svc/archive/v1/{year}/{month}.json"
 
@@ -29,7 +33,7 @@ def parse_nyt_article(raw: dict) -> dict:
     keywords_str = json.dumps([kw.get("value", "") for kw in keywords_list]) if keywords_list else "[]"
 
     return {
-        "nyt_id": raw.get("_id", ""),
+        "source_id": raw.get("_id", ""),
         "headline": headline,
         "summary": summary,
         "source": raw.get("source", "The New York Times"),
@@ -63,11 +67,14 @@ def ingest_month(
     year: int,
     month: int,
 ) -> int:
+    logger.info("Fetching NYT archive for %d-%02d", year, month)
     data = _fetch_archive(api_key, year, month)
     docs = data.get("response", {}).get("docs", [])
+    logger.info("Received %d documents from NYT archive", len(docs))
 
     conn = get_connection(db_path)
     inserted = 0
+    skipped = 0
 
     for raw in docs:
         if not _should_include(raw):
@@ -77,11 +84,11 @@ def ingest_month(
         try:
             conn.execute(
                 """INSERT INTO articles
-                   (nyt_id, headline, summary, source, url, published_at,
+                   (source_id, headline, summary, source, url, published_at,
                     keywords, category, news_desk, word_count)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    parsed["nyt_id"],
+                    parsed["source_id"],
                     parsed["headline"],
                     parsed["summary"],
                     parsed["source"],
@@ -94,11 +101,12 @@ def ingest_month(
                 ),
             )
             inserted += 1
-        except Exception:
-            pass  # Skip duplicates
+        except sqlite3.IntegrityError:
+            skipped += 1
 
     conn.commit()
     conn.close()
+    logger.info("NYT %d-%02d: inserted=%d, skipped_dupes=%d", year, month, inserted, skipped)
     return inserted
 
 

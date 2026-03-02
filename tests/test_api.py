@@ -47,11 +47,20 @@ def test_get_headlines():
 
 
 def test_get_timeline():
-    with patch("narratio.api.get_timeline_df", return_value=_mock_timeline_df()):
+    with patch("narratio.api.get_timeline_with_other", return_value=_mock_timeline_df()):
         resp = client.get("/api/timeline")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 2
+
+
+def test_get_timeline_with_explicit_narratives():
+    with patch("narratio.api.get_timeline_df", return_value=_mock_timeline_df()):
+        resp = client.get("/api/timeline?narratives=1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["narrative_id"] == 1
 
 
 def test_pipeline_status():
