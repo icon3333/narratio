@@ -12,7 +12,6 @@ dependencies = [
     "rich>=13.0",
     "fastapi>=0.115",
     "uvicorn>=0.34",
-    "plotly>=6.0",
     "pandas>=2.2",
 ]
 
@@ -30,7 +29,6 @@ dev = [
 
 [project.scripts]
 narratio = "narratio.pipeline:main"
-narratio-app = "narratio._run_app:main"
 
 [build-system]
 requires = ["hatchling"]
