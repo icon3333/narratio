@@ -21,9 +21,9 @@ def test_label_clusters_creates_narratives(tmp_path):
     embeddings = []
     for i in range(20):
         conn.execute(
-            """INSERT INTO articles (finnhub_id, headline, summary, source, url, published_at, category)
+            """INSERT INTO articles (nyt_id, headline, summary, source, url, published_at, category)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (i, f"Fed rate cut headline {i}", "summary", "test", "http://test.com", 1700000000, "general"),
+            (f"nyt-{i}", f"Fed rate cut headline {i}", "summary", "test", "http://test.com", "2025-12-01T00:00:00+0000", "general"),
         )
         conn.execute(
             "INSERT INTO article_analysis (article_id, embedding_index, cluster_id) VALUES (?, ?, ?)",

@@ -1,7 +1,7 @@
 """Weekly narrative summarization and analytics computation."""
 
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import httpx
 from narratio.db import get_connection
 
@@ -23,8 +23,8 @@ def _call_openrouter_chat(messages: list[dict], api_key: str, model: str = SUMMA
     return resp.json()
 
 
-def _week_start(timestamp: int) -> str:
-    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+def _week_start(published_at: str) -> str:
+    dt = datetime.fromisoformat(published_at.replace("+0000", "+00:00"))
     monday = dt - timedelta(days=dt.weekday())
     return monday.strftime("%Y-%m-%d")
 

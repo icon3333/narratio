@@ -19,9 +19,9 @@ def test_generate_report_returns_string(tmp_path):
 
     for i in range(5):
         conn.execute(
-            """INSERT INTO articles (finnhub_id, headline, summary, source, url, published_at, category)
+            """INSERT INTO articles (nyt_id, headline, summary, source, url, published_at, category)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (i, f"Fed rate headline {i}", "summary", "test", "http://test.com", 1733011200, "general"),
+            (f"nyt-{i}", f"Fed rate headline {i}", "summary", "test", "http://test.com", "2025-12-01T00:00:00+0000", "general"),
         )
         conn.execute(
             "INSERT INTO article_analysis (article_id, narrative_id) VALUES (?, 1)",

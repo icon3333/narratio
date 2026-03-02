@@ -2,7 +2,7 @@
 
 import numpy as np
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime
 from narratio.db import get_connection
 
 LABEL_MODEL = "google/gemini-2.0-flash-001"
@@ -89,8 +89,8 @@ def label_clusters(
             (cluster_id,),
         ).fetchone()
 
-        first_seen = datetime.fromtimestamp(dates["first"], tz=timezone.utc).strftime("%Y-%m-%d")
-        last_seen = datetime.fromtimestamp(dates["last"], tz=timezone.utc).strftime("%Y-%m-%d")
+        first_seen = datetime.fromisoformat(dates["first"].replace("+0000", "+00:00")).strftime("%Y-%m-%d")
+        last_seen = datetime.fromisoformat(dates["last"].replace("+0000", "+00:00")).strftime("%Y-%m-%d")
 
         cursor = conn.execute(
             """INSERT INTO narratives (label, first_seen, last_seen, status, centroid_embedding_index)

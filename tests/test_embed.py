@@ -19,9 +19,9 @@ def test_embed_articles_stores_embeddings(tmp_path):
     conn = get_connection(db_path)
     for i in range(3):
         conn.execute(
-            """INSERT INTO articles (finnhub_id, headline, summary, source, url, published_at, category)
+            """INSERT INTO articles (nyt_id, headline, summary, source, url, published_at, category)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (i, f"Headline {i}", f"Summary {i}", "test", "http://test.com", 1700000000 + i, "general"),
+            (f"nyt-{i}", f"Headline {i}", f"Summary {i}", "test", "http://test.com", "2025-12-01T00:00:00+0000", "general"),
         )
         conn.execute(
             "INSERT INTO article_analysis (article_id) VALUES (?)",

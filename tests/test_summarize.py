@@ -15,11 +15,11 @@ def test_summarize_narratives_creates_weekly_records(tmp_path):
     )
 
     for i in range(10):
-        week_ts = 1733011200 if i < 5 else 1733616000  # Dec 1 and Dec 8 2024
+        week_iso = "2024-12-01T00:00:00+0000" if i < 5 else "2024-12-08T00:00:00+0000"
         conn.execute(
-            """INSERT INTO articles (finnhub_id, headline, summary, source, url, published_at, category)
+            """INSERT INTO articles (nyt_id, headline, summary, source, url, published_at, category)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (i, f"Fed rate headline {i}", f"Summary about rates {i}", "test", "http://test.com", week_ts, "general"),
+            (f"nyt-{i}", f"Fed rate headline {i}", f"Summary about rates {i}", "test", "http://test.com", week_iso, "general"),
         )
         conn.execute(
             "INSERT INTO article_analysis (article_id, narrative_id, sentiment_score) VALUES (?, 1, 0.3)",
