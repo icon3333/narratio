@@ -16,6 +16,7 @@ from narratio.data import (
     get_narrative_headlines,
     get_articles_paginated,
     get_stats,
+    get_arising,
     compute_significance_scores,
 )
 from narratio.db import init_db, get_connection
@@ -114,6 +115,15 @@ def stats():
         return get_stats(DB_PATH)
     except Exception as e:
         logger.error("Failed to get stats: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/arising")
+def arising():
+    try:
+        return get_arising(DB_PATH)
+    except Exception as e:
+        logger.error("Failed to get arising: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

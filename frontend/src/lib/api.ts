@@ -132,6 +132,26 @@ export async function fetchStats(): Promise<Stats> {
   return res.json();
 }
 
+export interface ArisingNarrative {
+  id: number;
+  label: string;
+  first_seen: string;
+  status: string;
+  arising_score: number;
+  latest_share: number | null;
+  article_count_total: number;
+  article_count_latest: number;
+  weeks_active: number;
+  growth_trend: "accelerating" | "steady" | "fading";
+  weekly_articles: number[];
+}
+
+export async function fetchArising(): Promise<ArisingNarrative[]> {
+  const res = await fetch(`${API_BASE}/api/arising`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
 export interface PipelineStatus {
   running: boolean;
   last_result: string | null;

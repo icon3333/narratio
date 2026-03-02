@@ -5,6 +5,7 @@ import TimelineChart from "@/components/TimelineChart";
 import NarrativeTable from "@/components/NarrativeTable";
 import ArticlesTab from "@/components/ArticlesTab";
 import StatsTab from "@/components/StatsTab";
+import ArisingTab from "@/components/ArisingTab";
 import {
   fetchNarratives,
   fetchTimeline,
@@ -36,7 +37,7 @@ function SkeletonTable() {
   );
 }
 
-type TabKey = "narratives" | "articles" | "stats";
+type TabKey = "arising" | "history" | "articles" | "stats";
 type TimeRange = "all" | "1y" | "quarter" | "month";
 
 function getTimeRangeParams(range: TimeRange): { start?: string } {
@@ -59,7 +60,7 @@ function getTimeRangeParams(range: TimeRange): { start?: string } {
 }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<TabKey>("narratives");
+  const [activeTab, setActiveTab] = useState<TabKey>("arising");
   const [narratives, setNarratives] = useState<Narrative[]>([]);
   const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
   const [mode, setMode] = useState<"attention" | "zscore">("attention");
@@ -177,7 +178,7 @@ export default function Dashboard() {
     <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
       {/* Tab Bar */}
       <div className="tab-bar fade-up">
-        {(["narratives", "articles", "stats"] as TabKey[]).map((tab) => (
+        {(["arising", "history", "articles", "stats"] as TabKey[]).map((tab) => (
           <button
             key={tab}
             className={activeTab === tab ? "tab-active" : ""}
@@ -188,10 +189,11 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {activeTab === "arising" && <ArisingTab />}
       {activeTab === "articles" && <ArticlesTab />}
       {activeTab === "stats" && <StatsTab />}
 
-      {activeTab === "narratives" && error && (
+      {activeTab === "history" && error && (
         <div
           style={{
             padding: "0.75rem 1rem",
@@ -206,7 +208,7 @@ export default function Dashboard() {
           {error}
         </div>
       )}
-      {activeTab === "narratives" && (
+      {activeTab === "history" && (
         <>
           {/* Controls */}
           <div
