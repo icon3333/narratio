@@ -10,12 +10,14 @@ import CoversTab from "@/components/CoversTab";
 import {
   fetchNarratives,
   fetchTimeline,
+  fetchCovers,
   triggerPipeline,
   triggerAnalysis,
   fetchPipelineStatus,
   Narrative,
   TimelinePoint,
   PipelineStatus,
+  Cover,
 } from "@/lib/api";
 
 function SkeletonChart() {
@@ -61,13 +63,15 @@ function getTimeRangeParams(range: TimeRange): { start?: string } {
 }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<TabKey>("arising");
+  const [activeTab, setActiveTab] = useState<TabKey>("history");
   const [narratives, setNarratives] = useState<Narrative[]>([]);
   const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
   const [mode, setMode] = useState<"attention" | "zscore">("attention");
-  const [timeRange, setTimeRange] = useState<TimeRange>("1y");
+  const [timeRange, setTimeRange] = useState<TimeRange>("quarter");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showCovers, setShowCovers] = useState(false);
+  const [allCovers, setAllCovers] = useState<Cover[]>([]);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>({
     running: false, last_result: null, step: 0, total_steps: 0, step_label: "",
   });
@@ -107,9 +111,27 @@ export default function Dashboard() {
   const visibleIds = new Set(rankedLabels.slice(0, visibleCount).flatMap((r) => [...r.ids]));
   const filteredTimeline = timeline.filter((d) => visibleLabels.has(d.label));
 
+  // Filter covers to current time range
+  const visibleCovers = (() => {
+    if (!showCovers || allCovers.length === 0) return undefined;
+    const rangeParams = getTimeRangeParams(timeRange);
+    const startDate = rangeParams.start ? new Date(rangeParams.start) : null;
+    return allCovers.filter((c) => {
+      if (!startDate) return true;
+      return new Date(c.date) >= startDate;
+    });
+  })();
   useEffect(() => {
     loadData();
   }, [timeRange]);
+
+  // Fetch all covers when toggle is turned on
+  useEffect(() => {
+    if (!showCovers || allCovers.length > 0) return;
+    fetchCovers(undefined, 1, 500)
+      .then((res) => setAllCovers(res.covers))
+      .catch((err) => console.error("Cover fetch failed:", err));
+  }, [showCovers, allCovers.length]);
 
   // Cleanup polling interval on unmount
   useEffect(() => {
@@ -179,7 +201,7 @@ export default function Dashboard() {
     <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
       {/* Tab Bar */}
       <div className="tab-bar fade-up">
-        {(["arising", "history", "articles", "covers", "stats"] as TabKey[]).map((tab) => (
+        {(["history", "arising", "articles", "covers", "stats"] as TabKey[]).map((tab) => (
           <button
             key={tab}
             className={activeTab === tab ? "tab-active" : ""}
@@ -244,6 +266,11 @@ export default function Dashboard() {
               <ModeButton active={timeRange === "month"} onClick={() => setTimeRange("month")}>
                 Month
               </ModeButton>
+              <div style={{ borderLeft: "1px solid var(--border)", paddingLeft: "0.5rem", marginLeft: "0.25rem", display: "flex", alignItems: "center" }}>
+                <ToggleSwitch checked={showCovers} onChange={() => setShowCovers((v) => !v)}>
+                  Covers
+                </ToggleSwitch>
+              </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               {pipelineRunning ? (
@@ -313,7 +340,7 @@ export default function Dashboard() {
                     />
                   </div>
                 )}
-                <TimelineChart data={filteredTimeline} mode={mode} />
+                <TimelineChart data={filteredTimeline} mode={mode} covers={visibleCovers} />
               </div>
             )}
           </div>
@@ -377,6 +404,23 @@ function PipelineButton({ onClick, children }: { onClick: () => void; children: 
     >
       {children}
     </button>
+  );
+}
+
+function ToggleSwitch({ checked, onChange, children }: { checked: boolean; onChange: () => void; children: React.ReactNode }) {
+  return (
+    <label className="toggle-switch" style={{ display: "flex", alignItems: "center", gap: "0.4rem", cursor: "pointer" }}>
+      <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.75rem", fontWeight: 500, color: checked ? "var(--red)" : "var(--text-secondary)", letterSpacing: "0.03em" }}>
+        {children}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onChange}
+        className={`toggle-track${checked ? " toggle-track--on" : ""}`}
+      />
+    </label>
   );
 }
 

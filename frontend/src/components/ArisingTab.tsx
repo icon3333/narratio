@@ -193,7 +193,7 @@ export default function ArisingTab() {
       {/* Summary Cards */}
       <div className="stats-grid" style={{ marginBottom: "1.5rem" }}>
         <div className="stat-card">
-          <div className="stat-label">New This Month</div>
+          <div className="stat-label">Rising</div>
           <div className="stat-value">{data.length}</div>
           <div className="stat-sub">
             {data.length > 0
@@ -256,7 +256,7 @@ export default function ArisingTab() {
                 fontSize: "0.85rem",
               }}
             >
-              No new narratives have emerged recently.
+              No narratives with rising momentum detected.
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>

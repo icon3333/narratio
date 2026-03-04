@@ -197,15 +197,18 @@ export interface CoversResponse {
   years: number[];
 }
 
-export function coverImageUrl(url: string): string {
-  const optimized = url.replace("width=1424", "width=960");
+export function coverImageUrl(url: string, thumb = false): string {
+  const optimized = thumb
+    ? url.replace("width=1424", "width=120").replace("quality=80", "quality=60")
+    : url.replace("width=1424", "width=960");
   return `${API_BASE}/api/covers/image-proxy?url=${encodeURIComponent(optimized)}`;
 }
 
-export async function fetchCovers(year?: number, page?: number): Promise<CoversResponse> {
+export async function fetchCovers(year?: number, page?: number, perPage?: number): Promise<CoversResponse> {
   const params = new URLSearchParams();
   if (year) params.set("year", year.toString());
   if (page) params.set("page", page.toString());
+  if (perPage) params.set("per_page", perPage.toString());
   const res = await fetch(`${API_BASE}/api/covers?${params}`);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();

@@ -6,6 +6,7 @@ dormancy/re-emergence, and max narrative cap enforcement.
 """
 
 import logging
+import time
 import numpy as np
 import httpx
 from datetime import datetime
@@ -14,21 +15,35 @@ from narratio.db import get_connection
 logger = logging.getLogger(__name__)
 
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+MAX_RETRIES = 5
+BACKOFF_BASE = 2  # seconds
 
 
 def _call_openrouter_chat(messages: list[dict], api_key: str, model: str) -> dict:
-    """Send a chat completion request to OpenRouter."""
-    resp = httpx.post(
-        OPENROUTER_CHAT_URL,
-        json={"model": model, "messages": messages, "temperature": 0},
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        timeout=60,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    """Send a chat completion request to OpenRouter with retry logic."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            resp = httpx.post(
+                OPENROUTER_CHAT_URL,
+                json={"model": model, "messages": messages, "temperature": 0},
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=120,
+            )
+            if resp.status_code == 429:
+                wait = min(BACKOFF_BASE ** (attempt + 1), 32)
+                logger.warning("Label API rate limited, retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.ReadTimeout:
+            wait = min(BACKOFF_BASE ** (attempt + 1), 32)
+            logger.warning("Label API read timeout, retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
+            time.sleep(wait)
+    raise RuntimeError(f"OpenRouter API failed after {MAX_RETRIES} retries")
 
 
 def _build_label_prompt(headlines: list[str]) -> str:

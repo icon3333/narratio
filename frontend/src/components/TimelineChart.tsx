@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { TimelinePoint } from "@/lib/api";
+import { useRef, useEffect, useState, useCallback } from "react";
+import { TimelinePoint, Cover, coverImageUrl } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
@@ -22,14 +23,52 @@ const PALETTE = [
   "#9b6b9e", // mauve
 ];
 
+const THUMB_W = 34;
+const THUMB_H = Math.round(THUMB_W * (66 / 51));
+// Plotly margin matches sharedLayout below
+const MARGIN_L = 50;
+const MARGIN_R = 16;
+
 interface Props {
   data: TimelinePoint[];
   mode: "attention" | "zscore";
+  covers?: Cover[];
 }
 
-export default function TimelineChart({ data, mode }: Props) {
+export default function TimelineChart({ data, mode, covers }: Props) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [containerW, setContainerW] = useState(0);
+  const [hoveredCoverId, setHoveredCoverId] = useState<number | null>(null);
+  const [zoomState, setZoomState] = useState<{ id: number; transform: string } | null>(null);
+  const [loadedCovers, setLoadedCovers] = useState<Set<number>>(new Set());
+
+  function handleThumbClick(cover: Cover, e: React.MouseEvent) {
+    if (zoomState?.id === cover.id) {
+      setZoomState(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const tx = window.innerWidth / 2 - cx;
+    const ty = window.innerHeight / 2 - cy;
+    setZoomState({ id: cover.id, transform: `translate(${tx}px, ${ty}px) scale(12)` });
+  }
+
+  // Observe container width for proportional cover placement
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerW(entry.contentRect.width);
+      }
+    });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   if (data.length === 0) {
     return (
@@ -54,10 +93,42 @@ export default function TimelineChart({ data, mode }: Props) {
   const bandColor = isDark ? "rgba(239,68,68,0.06)" : "rgba(227,18,11,0.04)";
   const bandStrongColor = isDark ? "rgba(239,68,68,0.12)" : "rgba(227,18,11,0.08)";
   const thresholdColor = isDark ? "rgba(239,68,68,0.3)" : "rgba(227,18,11,0.2)";
+  const coverLineColor = isDark ? "rgba(200,200,200,0.3)" : "rgba(100,100,100,0.3)";
 
   // Filter out "Other" bucket — only show real narratives
   const filtered = data.filter((d) => d.label !== "Other");
   const labels = [...new Set(filtered.map((d) => d.label))];
+
+  // Compute date range from the actual data
+  const allDates = filtered.map((d) => new Date(d.week_start).getTime());
+  const minDate = Math.min(...allDates);
+  const maxDate = Math.max(...allDates);
+  const dateSpan = maxDate - minDate || 1;
+
+  // Compute cover thumbnail positions proportionally
+  const plotWidth = containerW - MARGIN_L - MARGIN_R;
+  const thumbPositions = (covers && covers.length > 0 && plotWidth > 0)
+    ? covers
+        .map((cover) => {
+          const t = new Date(cover.date).getTime();
+          const frac = (t - minDate) / dateSpan;
+          const left = MARGIN_L + frac * plotWidth;
+          return { cover, left };
+        })
+        .filter(({ left }) => left >= MARGIN_L - THUMB_W / 2 && left <= MARGIN_L + plotWidth + THUMB_W / 2)
+    : [];
+  // Cover vertical line shapes
+  const coverShapes: Partial<Plotly.Shape>[] = covers?.length
+    ? covers.map((c) => ({
+        type: "line" as const,
+        x0: c.date,
+        x1: c.date,
+        y0: 0,
+        y1: 1,
+        yref: "paper" as const,
+        line: { color: coverLineColor, dash: "dot" as const, width: 1 },
+      }))
+    : [];
 
   const sharedLayout: Partial<Plotly.Layout> = {
     height: 380,
@@ -83,7 +154,7 @@ export default function TimelineChart({ data, mode }: Props) {
         size: 11,
       },
     },
-    margin: { l: 50, r: 16, t: 8, b: 70 },
+    margin: { l: MARGIN_L, r: MARGIN_R, t: 8, b: 70 },
     xaxis: {
       type: "date" as const,
       gridcolor: gridColor,
@@ -98,11 +169,19 @@ export default function TimelineChart({ data, mode }: Props) {
     },
   };
 
+  const plotProps = {
+    config: { responsive: true, displayModeBar: false } as Partial<Plotly.Config>,
+    style: { width: "100%" },
+  };
+
+  let traces: any[];
+  let layout: Partial<Plotly.Layout>;
+
   if (mode === "attention") {
     const uniqueWeeks = [...new Set(filtered.map((d) => d.week_start))];
     const useBars = uniqueWeeks.length <= 1;
 
-    const traces = labels.map((label, i) => {
+    traces = labels.map((label, i) => {
       const points = filtered.filter((d) => d.label === label);
       const color = PALETTE[i % PALETTE.length];
       if (useBars) {
@@ -129,77 +208,152 @@ export default function TimelineChart({ data, mode }: Props) {
       };
     });
 
-    return (
-      <Plot
-        data={traces}
-        layout={{
-          ...sharedLayout,
-          yaxis: {
-            ...sharedLayout.yaxis,
-            title: { text: "Share of Attention", font: { size: 11, color: secondaryColor } },
-            ticksuffix: "%",
-          },
-          ...(useBars ? { barmode: "group" as const } : {}),
-        }}
-        config={{ responsive: true, displayModeBar: false }}
-        style={{ width: "100%" }}
-      />
-    );
-  }
+    layout = {
+      ...sharedLayout,
+      yaxis: {
+        ...sharedLayout.yaxis,
+        title: { text: "Share of Attention", font: { size: 11, color: secondaryColor } },
+        ticksuffix: "%",
+      },
+      ...(useBars ? { barmode: "group" as const } : {}),
+      shapes: [...coverShapes],
+    };
+  } else {
+    // Z-Score mode
+    const uniqueWeeksZ = [...new Set(filtered.map((d) => d.week_start))];
+    const useBarsZ = uniqueWeeksZ.length <= 1;
 
-  // Z-Score mode
-  const uniqueWeeksZ = [...new Set(filtered.map((d) => d.week_start))];
-  const useBarsZ = uniqueWeeksZ.length <= 1;
-
-  const traces = labels.map((label, i) => {
-    const points = filtered.filter((d) => d.label === label);
-    if (useBarsZ) {
+    traces = labels.map((label, i) => {
+      const points = filtered.filter((d) => d.label === label);
+      if (useBarsZ) {
+        return {
+          x: [label],
+          y: [points[0]?.z_score ?? 0],
+          name: label,
+          type: "bar" as const,
+          marker: { color: PALETTE[i % PALETTE.length] },
+          hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f}<extra></extra>`,
+        };
+      }
       return {
-        x: [label],
-        y: [points[0]?.z_score ?? 0],
+        x: points.map((p) => p.week_start),
+        y: points.map((p) => p.z_score),
         name: label,
-        type: "bar" as const,
-        marker: { color: PALETTE[i % PALETTE.length] },
+        type: "scatter" as const,
+        mode: "lines+markers" as const,
+        line: { color: PALETTE[i % PALETTE.length], width: 2 },
+        marker: { size: 4, color: PALETTE[i % PALETTE.length] },
         hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f}<extra></extra>`,
       };
-    }
-    return {
-      x: points.map((p) => p.week_start),
-      y: points.map((p) => p.z_score),
-      name: label,
-      type: "scatter" as const,
-      mode: "lines+markers" as const,
-      line: { color: PALETTE[i % PALETTE.length], width: 2 },
-      marker: { size: 4, color: PALETTE[i % PALETTE.length] },
-      hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f}<extra></extra>`,
+    });
+
+    const zScoreShapes = useBarsZ ? [] : [
+      { type: "rect" as const, y0: 1.5, y1: 2.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandColor, line: { width: 0 } },
+      { type: "rect" as const, y0: 2.0, y1: 4.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandStrongColor, line: { width: 0 } },
+      { type: "rect" as const, y0: -2.0, y1: -1.5, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandColor, line: { width: 0 } },
+      { type: "rect" as const, y0: -4.0, y1: -2.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandStrongColor, line: { width: 0 } },
+      { type: "line" as const, y0: 2.0, y1: 2.0, x0: 0, x1: 1, xref: "paper" as const, line: { color: thresholdColor, dash: "dot" as const, width: 1 } },
+      { type: "line" as const, y0: -2.0, y1: -2.0, x0: 0, x1: 1, xref: "paper" as const, line: { color: thresholdColor, dash: "dot" as const, width: 1 } },
+    ];
+
+    layout = {
+      ...sharedLayout,
+      ...(useBarsZ ? { barmode: "group" as const } : {}),
+      yaxis: {
+        ...sharedLayout.yaxis,
+        title: { text: "Z-Score", font: { size: 11, color: secondaryColor } },
+        zeroline: true,
+        zerolinecolor: zerolineColor,
+      },
+      shapes: [...zScoreShapes, ...coverShapes],
     };
-  });
+  }
 
   return (
-    <Plot
-      data={traces}
-      layout={{
-        ...sharedLayout,
-        ...(useBarsZ ? { barmode: "group" as const } : {}),
-          yaxis: {
-            ...sharedLayout.yaxis,
-            title: { text: "Z-Score", font: { size: 11, color: secondaryColor } },
-            zeroline: true,
-            zerolinecolor: zerolineColor,
-          },
-          shapes: useBarsZ ? [] : [
-            // Alert bands
-            { type: "rect", y0: 1.5, y1: 2.0, x0: 0, x1: 1, xref: "paper", fillcolor: bandColor, line: { width: 0 } },
-            { type: "rect", y0: 2.0, y1: 4.0, x0: 0, x1: 1, xref: "paper", fillcolor: bandStrongColor, line: { width: 0 } },
-            { type: "rect", y0: -2.0, y1: -1.5, x0: 0, x1: 1, xref: "paper", fillcolor: bandColor, line: { width: 0 } },
-            { type: "rect", y0: -4.0, y1: -2.0, x0: 0, x1: 1, xref: "paper", fillcolor: bandStrongColor, line: { width: 0 } },
-            // Threshold lines
-            { type: "line", y0: 2.0, y1: 2.0, x0: 0, x1: 1, xref: "paper", line: { color: thresholdColor, dash: "dot", width: 1 } },
-            { type: "line", y0: -2.0, y1: -2.0, x0: 0, x1: 1, xref: "paper", line: { color: thresholdColor, dash: "dot", width: 1 } },
-          ],
-        }}
-        config={{ responsive: true, displayModeBar: false }}
-        style={{ width: "100%" }}
-      />
+    <div ref={wrapperRef} style={{ position: "relative" }}>
+      {/* Cover thumbnail strip — always reserve space when covers exist to prevent layout shift */}
+      {covers && covers.length > 0 && (
+        <div style={{ position: "relative", height: 50, marginBottom: -4, pointerEvents: "none" }}>
+          {thumbPositions.map(({ cover, left }) => {
+            const isZoomed = zoomState?.id === cover.id;
+            const isHovered = hoveredCoverId === cover.id && !isZoomed;
+            const showLabel = isHovered || isZoomed;
+            return (
+              <div
+                key={cover.id}
+                onMouseEnter={() => setHoveredCoverId(cover.id)}
+                onMouseLeave={() => setHoveredCoverId(null)}
+                onClick={(e) => handleThumbClick(cover, e)}
+                style={{
+                  position: "absolute",
+                  top: 4,
+                  left: left - THUMB_W / 2,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  pointerEvents: "auto",
+                  zIndex: isZoomed ? 1000 : isHovered ? 100 : 10,
+                  transform: isZoomed ? zoomState.transform : "none",
+                  transition: "transform 0.25s ease",
+                  cursor: "pointer",
+                }}
+              >
+                <img
+                  src={coverImageUrl(cover.image_url, true)}
+                  alt={`Economist ${cover.date}`}
+                  width={THUMB_W}
+                  height={THUMB_H}
+                  loading="eager"
+                  onLoad={() => setLoadedCovers(prev => { const next = new Set(prev); next.add(cover.id); return next; })}
+                  style={{
+                    display: "block",
+                    borderRadius: 2,
+                    border: `1px solid ${isHovered || isZoomed ? "var(--red)" : "var(--border)"}`,
+                    objectFit: "cover",
+                    opacity: loadedCovers.has(cover.id) ? 1 : 0,
+                    transition: "opacity 0.15s ease, transform 0.2s ease, box-shadow 0.2s ease",
+                    transform: isHovered ? "scale(4)" : "none",
+                    transformOrigin: "top center",
+                    boxShadow: isZoomed
+                      ? "0 8px 40px rgba(0,0,0,0.5)"
+                      : isHovered
+                        ? "0 4px 20px rgba(0,0,0,0.3)"
+                        : "none",
+                  }}
+                />
+                <span
+                  style={{
+                    fontFamily: "var(--font-sans)",
+                    fontSize: showLabel ? "0.6rem" : 0,
+                    color: "var(--text-secondary)",
+                    whiteSpace: "nowrap",
+                    opacity: showLabel ? 1 : 0,
+                    transition: "opacity 0.15s ease, font-size 0.15s ease",
+                    pointerEvents: "none",
+                    marginTop: 2,
+                  }}
+                >
+                  {new Date(cover.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {zoomState !== null && (
+        <div
+          onClick={() => setZoomState(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 999,
+            background: "rgba(0, 0, 0, 0.7)",
+            cursor: "pointer",
+            animation: "fadeIn 0.2s ease",
+          }}
+        />
+      )}
+      <Plot data={traces} layout={layout} {...plotProps} />
+    </div>
   );
 }

@@ -398,16 +398,19 @@ def get_stats(db_path: str) -> dict:
     }
 
 
-def get_arising(db_path: str, lookback_weeks: int = 52, min_articles: int = 5, top_n: int = 15) -> list[dict]:
-    """Return genuinely new narratives ranked by an arising score.
+def get_arising(db_path: str, lookback_weeks: int = 12, min_articles: int = 50, top_n: int = 15) -> list[dict]:
+    """Return narratives with rising momentum, ranked by arising score.
+
+    Uses a trailing window (default 12 weeks ≈ 3 months) to detect narratives
+    whose coverage is growing, regardless of when they first appeared.
 
     Hard filters:
-    - first_seen within lookback_weeks (default 52 = ~1 year)
-    - minimum min_articles total (default 5, filters noise blips)
+    - ≥ min_articles in the trailing window (default 50)
+    - Positive slope (only rising narratives)
 
-    arising_score = 0.40 * growth_velocity   (week-over-week acceleration)
+    arising_score = 0.40 * growth_velocity   (slope normalized: 5 articles/week = 1.0)
                   + 0.30 * current_strength   (latest share_of_attention, normalized)
-                  + 0.30 * consistency         (fraction of weeks with data since first_seen)
+                  + 0.30 * consistency         (fraction of window weeks with data)
     """
     conn = get_connection(db_path)
 
@@ -417,38 +420,24 @@ def get_arising(db_path: str, lookback_weeks: int = 52, min_articles: int = 5, t
         conn.close()
         return []
     latest_date = datetime.fromisoformat(latest_row["latest"])
-    cutoff = (latest_date - timedelta(weeks=lookback_weeks)).strftime("%Y-%m-%d")
+    window_start = (latest_date - timedelta(weeks=lookback_weeks)).strftime("%Y-%m-%d")
 
-    # Get narratives first_seen within the lookback window, with enough articles
-    narr_rows = conn.execute(
-        """SELECT n.id, n.label, n.first_seen, n.status,
-                  COUNT(aa.article_id) as total_articles
-           FROM narratives n
-           JOIN article_analysis aa ON aa.narrative_id = n.id
-           WHERE n.first_seen >= ?
-           GROUP BY n.id
-           HAVING total_articles >= ?""",
-        (cutoff, min_articles),
-    ).fetchall()
-
-    if not narr_rows:
-        conn.close()
-        return []
-
-    narr_ids = [r["id"] for r in narr_rows]
-    narr_meta = {r["id"]: {**dict(r)} for r in narr_rows}
-    placeholders = ",".join("?" * len(narr_ids))
-
-    # Get all narrative_weeks for these narratives
+    # Get all narratives with their weekly data in the trailing window
     week_rows = conn.execute(
-        f"""SELECT narrative_id, week_start, article_count, share_of_attention
-            FROM narrative_weeks
-            WHERE narrative_id IN ({placeholders})
-            ORDER BY narrative_id, week_start""",
-        narr_ids,
+        """SELECT nw.narrative_id, nw.week_start, nw.article_count, nw.share_of_attention
+           FROM narrative_weeks nw
+           WHERE nw.week_start >= ?
+           ORDER BY nw.narrative_id, nw.week_start""",
+        (window_start,),
     ).fetchall()
 
-    # Find max share across all narratives this week (for normalization)
+    # Get narrative metadata
+    narr_rows = conn.execute(
+        "SELECT id, label, first_seen, status FROM narratives",
+    ).fetchall()
+    narr_meta = {r["id"]: dict(r) for r in narr_rows}
+
+    # Find max share across all narratives in the latest week (for normalization)
     max_share_row = conn.execute(
         "SELECT MAX(share_of_attention) as ms FROM narrative_weeks WHERE week_start = ?",
         (latest_row["latest"],),
@@ -463,40 +452,44 @@ def get_arising(db_path: str, lookback_weeks: int = 52, min_articles: int = 5, t
         by_narrative[r["narrative_id"]].append(r)
 
     results = []
-    for nid in narr_ids:
-        weeks = by_narrative.get(nid, [])
-        if not weeks:
+    for nid, weeks in by_narrative.items():
+        if nid not in narr_meta:
             continue
 
         weeks_sorted = sorted(weeks, key=lambda w: w["week_start"])
         article_counts = [w["article_count"] or 0 for w in weeks_sorted]
         shares = [w["share_of_attention"] or 0 for w in weeks_sorted]
 
+        total_articles_in_window = sum(article_counts)
+        if total_articles_in_window < min_articles:
+            continue
+
         latest_share = shares[-1]
         latest_articles = article_counts[-1]
-        total_articles = narr_meta[nid]["total_articles"]
 
         # Growth velocity: linear slope of article_count over weeks, normalized
         n_weeks = len(article_counts)
         if n_weeks >= 2:
-            # Simple linear regression slope
             x_mean = (n_weeks - 1) / 2
             y_mean = sum(article_counts) / n_weeks
             numerator = sum((i - x_mean) * (y - y_mean) for i, y in enumerate(article_counts))
             denominator = sum((i - x_mean) ** 2 for i in range(n_weeks))
             slope = numerator / denominator if denominator > 0 else 0
-            # Normalize: slope of 5 articles/week = 1.0
-            growth_velocity = min(max(slope / 5, 0), 1.0)
         else:
-            growth_velocity = min(article_counts[0] / 10, 1.0) if article_counts[0] > 0 else 0
+            slope = 0
+
+        # Hard filter: only rising narratives
+        if slope <= 0:
+            continue
+
+        # Normalize: slope of 5 articles/week = 1.0
+        growth_velocity = min(slope / 5, 1.0)
 
         # Current strength: latest share normalized by max share
         current_strength = min(latest_share / max_share, 1.0) if max_share > 0 else 0
 
-        # Consistency: fraction of expected weeks that have data
-        first_seen = datetime.fromisoformat(narr_meta[nid]["first_seen"])
-        weeks_since_first = max(1, round((latest_date - first_seen).days / 7))
-        consistency = min(n_weeks / weeks_since_first, 1.0)
+        # Consistency: fraction of window weeks that have data
+        consistency = min(n_weeks / lookback_weeks, 1.0)
 
         arising_score = (
             0.40 * growth_velocity
@@ -505,24 +498,25 @@ def get_arising(db_path: str, lookback_weeks: int = 52, min_articles: int = 5, t
         )
 
         # Growth trend label from slope
-        if n_weeks >= 2:
-            if slope > 1:
-                growth_trend = "accelerating"
-            elif slope > -1:
-                growth_trend = "steady"
-            else:
-                growth_trend = "fading"
-        else:
+        if slope > 1:
+            growth_trend = "accelerating"
+        elif slope > 0:
             growth_trend = "steady"
+        else:
+            growth_trend = "fading"
+
+        meta = narr_meta[nid]
+        first_seen = datetime.fromisoformat(meta["first_seen"])
+        weeks_since_first = max(1, round((latest_date - first_seen).days / 7))
 
         results.append({
             "id": nid,
-            "label": narr_meta[nid]["label"],
-            "first_seen": narr_meta[nid]["first_seen"],
-            "status": narr_meta[nid]["status"],
+            "label": meta["label"],
+            "first_seen": meta["first_seen"],
+            "status": meta["status"],
             "arising_score": round(arising_score, 4),
             "latest_share": latest_share,
-            "article_count_total": total_articles,
+            "article_count_total": total_articles_in_window,
             "article_count_latest": latest_articles,
             "weeks_active": weeks_since_first,
             "growth_trend": growth_trend,

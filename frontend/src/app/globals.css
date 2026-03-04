@@ -216,6 +216,41 @@ body {
   color: var(--text-primary);
 }
 
+/* ---- Toggle Switch ---- */
+.toggle-track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  border: 1.5px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.toggle-track--on {
+  border-color: var(--red);
+  background: rgba(227, 18, 11, 0.08);
+}
+
+.toggle-track--on::after {
+  transform: translateX(14px);
+  background: var(--red);
+}
+
 .narrative-row {
   transition: background 0.15s ease;
 }
@@ -547,6 +582,7 @@ body {
 .covers-header select:focus {
   border-color: var(--red);
 }
+
 
 /* ---- Utility ---- */
 .fade-up {
