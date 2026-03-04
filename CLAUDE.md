@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Narratio (Narrative Radar)** — A financial market narrative tracking tool that automatically discovers, tracks, and visualizes macro market narratives from financial news. See `narrative_prd.md` for the original requirements document.
+**Narratio (Narrative Radar)** — A financial market narrative tracking tool that automatically discovers, tracks, and visualizes macro market narratives from financial news.
 
 ## Development Commands
 

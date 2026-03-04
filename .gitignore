@@ -8,3 +8,4 @@ data/
 *.swp
 .DS_Store
 node_modules/
+.pytest_cache/
