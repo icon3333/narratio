@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Narratio, please report it responsibly using [GitHub's private security advisory feature](https://github.com/your-repo/narratio/security/advisories/new).
+If you discover a security vulnerability in Narratio, please report it responsibly using [GitHub's private security advisory feature](https://github.com/icon3333/narratio/security/advisories/new).
 
 **Please do not open a public issue for security vulnerabilities.**
 

@@ -17,11 +17,25 @@ RELEVANT_SECTIONS = {
 }
 
 
-def _fetch_archive(api_key: str, year: int, month: int) -> dict:
+def _fetch_archive(api_key: str, year: int, month: int, max_retries: int = 3) -> dict:
     url = NYT_ARCHIVE_URL.format(year=year, month=month)
-    resp = httpx.get(url, params={"api-key": api_key}, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
+    for attempt in range(max_retries):
+        try:
+            resp = httpx.get(url, params={"api-key": api_key}, timeout=120)
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code < 500:
+                raise  # don't retry client errors (401, 403, 404, etc.)
+            if attempt == max_retries - 1:
+                raise
+            wait = 2 ** attempt * 5  # 5s, 10s, 20s
+        except httpx.TransportError as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = 2 ** attempt * 5
+            logger.warning("NYT fetch failed (attempt %d/%d): %s — retrying in %ds", attempt + 1, max_retries, e, wait)
+            time.sleep(wait)
 
 
 def parse_nyt_article(raw: dict) -> dict:
@@ -33,10 +47,10 @@ def parse_nyt_article(raw: dict) -> dict:
     keywords_str = json.dumps([kw.get("value", "") for kw in keywords_list]) if keywords_list else "[]"
 
     return {
-        "source_id": raw.get("_id", ""),
+        "source_id": f"nyt:{raw['_id']}",
         "headline": headline,
         "summary": summary,
-        "source": raw.get("source", "The New York Times"),
+        "source": "The New York Times",
         "url": raw.get("web_url", ""),
         "published_at": raw.get("pub_date", ""),
         "keywords": keywords_str,
@@ -47,9 +61,9 @@ def parse_nyt_article(raw: dict) -> dict:
 
 
 def _should_include(raw: dict) -> bool:
-    if raw.get("document_type") != "article":
+    if raw.get("document_type", "").lower() != "article":
         return False
-    if raw.get("type_of_material") != "News":
+    if raw.get("type_of_material", "").lower() != "news":
         return False
     section = raw.get("section_name", "")
     if section not in RELEVANT_SECTIONS:
@@ -78,6 +92,9 @@ def ingest_month(
 
     for raw in docs:
         if not _should_include(raw):
+            continue
+        if not raw.get("_id"):
+            logger.warning("Skipping NYT article with missing _id")
             continue
 
         parsed = parse_nyt_article(raw)
