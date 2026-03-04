@@ -475,12 +475,11 @@ body {
   overflow: hidden;
   box-shadow: var(--card-shadow);
   cursor: pointer;
-  transition: box-shadow 0.2s ease, transform 0.25s ease;
+  transition: box-shadow 0.2s ease;
 }
 
 .cover-card:hover {
   box-shadow: var(--card-hover);
-  transform: translateY(-2px);
 }
 
 .cover-card img {
@@ -525,15 +524,32 @@ body {
   animation: fadeIn 0.2s ease;
 }
 
-.cover-card--zoomed {
-  position: relative;
+.cover-modal {
+  position: fixed;
+  inset: 0;
   z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 2rem;
+}
+.cover-modal img {
+  max-height: 85vh;
+  max-width: 90vw;
+  object-fit: contain;
+  border-radius: 4px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
 }
-
-.cover-card--zoomed:hover {
-  transform: inherit;
+.cover-modal-info {
+  display: flex; gap: 1rem;
+  margin-top: 0.75rem;
+  color: rgba(255,255,255,0.85);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
 }
+
 
 @keyframes fadeIn {
   from { opacity: 0; }

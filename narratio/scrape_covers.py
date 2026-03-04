@@ -2,10 +2,11 @@
 
 import json
 import logging
-import sqlite3
 import subprocess
 from datetime import datetime
 from pathlib import Path
+
+from narratio.db import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ def scrape_covers(db_path: str, year: int | None = None) -> int:
     if not covers:
         return 0
 
-    conn = sqlite3.connect(db_path)
+    conn = get_connection(db_path)
     for cover in covers:
         try:
             conn.execute(
@@ -58,7 +59,7 @@ def scrape_covers(db_path: str, year: int | None = None) -> int:
                 (cover["date"], cover.get("title"), cover["image_url"],
                  cover.get("edition_url"), target_year),
             )
-        except sqlite3.Error as e:
+        except Exception as e:
             logger.warning("Failed to insert cover %s: %s", cover["date"], e)
     conn.commit()
 

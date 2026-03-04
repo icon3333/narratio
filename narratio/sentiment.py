@@ -133,48 +133,48 @@ async def _analyze_sentiment_async(
     model: str = "google/gemini-2.0-flash-001",
 ) -> int:
     conn = get_connection(db_path)
+    try:
+        rows = conn.execute(
+            """SELECT a.id, a.headline, a.summary
+               FROM articles a
+               JOIN article_analysis aa ON aa.article_id = a.id
+               WHERE aa.sentiment_score IS NULL
+               ORDER BY a.id"""
+        ).fetchall()
 
-    rows = conn.execute(
-        """SELECT a.id, a.headline, a.summary
-           FROM articles a
-           JOIN article_analysis aa ON aa.article_id = a.id
-           WHERE aa.sentiment_score IS NULL
-           ORDER BY a.id"""
-    ).fetchall()
+        if not rows:
+            logger.info("No articles need sentiment analysis")
+            return 0
 
-    if not rows:
-        logger.info("No articles need sentiment analysis")
+        logger.info("Analyzing sentiment for %d articles in %d batches", len(rows), (len(rows) + batch_size - 1) // batch_size)
+        batches = [rows[i : i + batch_size] for i in range(0, len(rows), batch_size)]
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async with httpx.AsyncClient() as client:
+            tasks = [_process_batch(client, semaphore, batch, api_key, model=model) for batch in batches]
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        total = 0
+        failures = 0
+        for result in batch_results:
+            if isinstance(result, Exception):
+                failures += 1
+                logger.error("Sentiment batch failed: %s", result)
+                continue
+            for article_id, score, label in result:
+                conn.execute(
+                    "UPDATE article_analysis SET sentiment_score = ?, sentiment_label = ? WHERE article_id = ?",
+                    (score, label, article_id),
+                )
+                total += 1
+        conn.commit()
+        if failures:
+            logger.warning("Sentiment complete: %d scored, %d batches failed", total, failures)
+        else:
+            logger.info("Sentiment complete: %d articles scored", total)
+        return total
+    finally:
         conn.close()
-        return 0
-
-    logger.info("Analyzing sentiment for %d articles in %d batches", len(rows), (len(rows) + batch_size - 1) // batch_size)
-    batches = [rows[i : i + batch_size] for i in range(0, len(rows), batch_size)]
-    semaphore = asyncio.Semaphore(max_concurrent)
-
-    async with httpx.AsyncClient() as client:
-        tasks = [_process_batch(client, semaphore, batch, api_key, model=model) for batch in batches]
-        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    total = 0
-    failures = 0
-    for result in batch_results:
-        if isinstance(result, Exception):
-            failures += 1
-            logger.error("Sentiment batch failed: %s", result)
-            continue
-        for article_id, score, label in result:
-            conn.execute(
-                "UPDATE article_analysis SET sentiment_score = ?, sentiment_label = ? WHERE article_id = ?",
-                (score, label, article_id),
-            )
-            total += 1
-    conn.commit()
-    conn.close()
-    if failures:
-        logger.warning("Sentiment complete: %d scored, %d batches failed", total, failures)
-    else:
-        logger.info("Sentiment complete: %d articles scored", total)
-    return total
 
 
 def analyze_sentiment(

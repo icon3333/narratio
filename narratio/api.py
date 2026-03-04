@@ -172,9 +172,8 @@ async def trigger_pipeline(background_tasks: BackgroundTasks):
         if _pipeline_status["running"]:
             return {"status": "already_running"}
         _pipeline_status["running"] = True
-
-    logger.info("Pipeline run triggered")
-    background_tasks.add_task(_run_pipeline_task)
+        logger.info("Pipeline run triggered")
+        background_tasks.add_task(_run_pipeline_task)
     return {"status": "started"}
 
 
@@ -184,15 +183,15 @@ async def trigger_analysis(background_tasks: BackgroundTasks):
         if _pipeline_status["running"]:
             return {"status": "already_running"}
         _pipeline_status["running"] = True
-
-    logger.info("Analysis run triggered")
-    background_tasks.add_task(_run_analysis_task)
+        logger.info("Analysis run triggered")
+        background_tasks.add_task(_run_analysis_task)
     return {"status": "started"}
 
 
 @app.get("/api/pipeline/status")
-def pipeline_status():
-    return _pipeline_status
+async def pipeline_status():
+    async with _pipeline_lock:
+        return dict(_pipeline_status)
 
 
 def _update_progress(step: int, label: str) -> None:

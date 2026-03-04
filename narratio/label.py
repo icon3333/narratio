@@ -57,14 +57,16 @@ Headlines:
 Return ONLY the label, nothing else. Example: "Fed Rate Cut Expectations" or "China Property Crisis"."""
 
 
-def _get_cluster_dates(conn, cluster_id: int, cluster_col: str = "merged_cluster_id") -> tuple[str, str]:
-    """Get first_seen and last_seen dates for a cluster."""
+def _get_cluster_dates(conn, cluster_id: int, cluster_col: str = "merged_cluster_id") -> tuple[str, str] | None:
+    """Get first_seen and last_seen dates for a cluster. Returns None if no articles found."""
     dates = conn.execute(
         f"""SELECT MIN(a.published_at) as first, MAX(a.published_at) as last
            FROM articles a JOIN article_analysis aa ON aa.article_id = a.id
            WHERE aa.{cluster_col} = ?""",
         (cluster_id,),
     ).fetchone()
+    if not dates or dates["first"] is None or dates["last"] is None:
+        return None
     first_seen = datetime.fromisoformat(dates["first"].replace("+0000", "+00:00")).strftime("%Y-%m-%d")
     last_seen = datetime.fromisoformat(dates["last"].replace("+0000", "+00:00")).strftime("%Y-%m-%d")
     return first_seen, last_seen
@@ -102,14 +104,19 @@ def label_clusters(
     # --- Phase 1: Compute centroids for existing narratives (both active and dormant) ---
     existing_narratives = conn.execute("SELECT id, label, status FROM narratives").fetchall()
     logger.info("Found %d existing narratives", len(existing_narratives))
+    # Batch fetch all embedding indices for existing narratives (avoids N+1)
+    all_indices = conn.execute(
+        "SELECT narrative_id, embedding_index FROM article_analysis WHERE narrative_id IS NOT NULL AND embedding_index IS NOT NULL"
+    ).fetchall()
+    indices_by_narrative: dict[int, list[int]] = {}
+    for r in all_indices:
+        indices_by_narrative.setdefault(r["narrative_id"], []).append(r["embedding_index"])
+
     old_centroids: dict[int, np.ndarray] = {}
     for n in existing_narratives:
-        indices = conn.execute(
-            "SELECT aa.embedding_index FROM article_analysis aa WHERE aa.narrative_id = ? AND aa.embedding_index IS NOT NULL",
-            (n["id"],),
-        ).fetchall()
-        if indices:
-            vecs = embeddings[[r["embedding_index"] for r in indices]]
+        idx_list = indices_by_narrative.get(n["id"])
+        if idx_list:
+            vecs = embeddings[idx_list]
             old_centroids[n["id"]] = vecs.mean(axis=0)
 
     # --- Phase 2: Clear narrative_id assignments (will reassign), but keep narratives + narrative_weeks ---
@@ -161,6 +168,14 @@ def label_clusters(
             narrative_id = best_nid
             n_matched += 1
             dates = _get_cluster_dates(conn, cid, cluster_col)
+            if dates is None:
+                logger.warning("Cluster %d has no article dates, skipping date update", cid)
+                conn.execute(
+                    f"UPDATE article_analysis SET narrative_id=? WHERE {cluster_col}=?",
+                    (narrative_id, cid),
+                )
+                conn.commit()
+                continue
             conn.execute(
                 """UPDATE narratives
                    SET first_seen = CASE WHEN first_seen < ? THEN first_seen ELSE ? END,
@@ -185,6 +200,9 @@ def label_clusters(
             label = result["choices"][0]["message"]["content"].strip().strip('"').strip("'")
 
             dates = _get_cluster_dates(conn, cid, cluster_col)
+            if dates is None:
+                logger.warning("New cluster %d has no article dates, skipping", cid)
+                continue
             cursor = conn.execute(
                 """INSERT INTO narratives (label, first_seen, last_seen, status, centroid_embedding_index)
                    VALUES (?, ?, ?, 'active', ?)""",

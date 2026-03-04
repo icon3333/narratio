@@ -22,7 +22,7 @@ export default function CoversTab() {
   const [selectedYear, setSelectedYear] = useState<number | undefined>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [zoomState, setZoomState] = useState<{ id: number; transform: string } | null>(null);
+  const [selectedCover, setSelectedCover] = useState<Cover | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadCovers = useCallback(async (year?: number) => {
@@ -58,19 +58,8 @@ export default function CoversTab() {
     setRefreshing(false);
   }
 
-  function handleCardClick(cover: Cover, e: React.MouseEvent<HTMLDivElement>) {
-    if (zoomState?.id === cover.id) {
-      setZoomState(null);
-      return;
-    }
-    const rect = e.currentTarget.getBoundingClientRect();
-    const cardCenterX = rect.left + rect.width / 2;
-    const cardCenterY = rect.top + rect.height / 2;
-    const vpCenterX = window.innerWidth / 2;
-    const vpCenterY = window.innerHeight / 2;
-    const tx = vpCenterX - cardCenterX;
-    const ty = vpCenterY - cardCenterY;
-    setZoomState({ id: cover.id, transform: `translate(${tx}px, ${ty}px) scale(2.5)` });
+  function handleCardClick(cover: Cover) {
+    setSelectedCover(cover);
   }
 
   function formatDate(dateStr: string) {
@@ -196,12 +185,11 @@ export default function CoversTab() {
           {covers.map((cover) => (
             <div
               key={cover.id}
-              className={`cover-card${zoomState?.id === cover.id ? " cover-card--zoomed" : ""}`}
-              onClick={(e) => handleCardClick(cover, e)}
-              style={zoomState?.id === cover.id ? { transform: zoomState.transform } : undefined}
+              className="cover-card"
+              onClick={() => handleCardClick(cover)}
             >
               <img
-                src={coverImageUrl(cover.image_url)}
+                src={coverImageUrl(cover.image_url, true)}
                 alt={cover.title || `Economist cover ${cover.date}`}
                 loading="lazy"
               />
@@ -229,9 +217,21 @@ export default function CoversTab() {
         </div>
       )}
 
-      {/* Backdrop for zoomed card */}
-      {zoomState !== null && (
-        <div className="cover-backdrop" onClick={() => setZoomState(null)} />
+      {/* Zoom modal for selected cover */}
+      {selectedCover !== null && (
+        <>
+          <div className="cover-backdrop" onClick={() => setSelectedCover(null)} />
+          <div className="cover-modal" onClick={() => setSelectedCover(null)}>
+            <img
+              src={coverImageUrl(selectedCover.image_url)}
+              alt={selectedCover.title || `Economist cover ${selectedCover.date}`}
+            />
+            <div className="cover-modal-info">
+              <span>{formatDate(selectedCover.date)}</span>
+              {selectedCover.title && <span>{selectedCover.title}</span>}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

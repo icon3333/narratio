@@ -54,14 +54,19 @@ def compute_significance_scores(db_path: str) -> int:
     current_date = datetime.fromisoformat(latest["latest"])
     four_weeks_ago = (current_date - timedelta(weeks=4)).strftime("%Y-%m-%d")
 
+    # Batch fetch all narrative weeks in one query (avoids N+1)
+    all_weeks = conn.execute(
+        "SELECT narrative_id, week_start, share_of_attention, z_score FROM narrative_weeks ORDER BY narrative_id, week_start"
+    ).fetchall()
+    weeks_by_narrative: dict[int, list] = {}
+    for w in all_weeks:
+        weeks_by_narrative.setdefault(w["narrative_id"], []).append(w)
+
     count = 0
+    updates = []
     for row in narratives:
         nid = row["id"]
-        weeks = conn.execute(
-            """SELECT week_start, share_of_attention, z_score
-               FROM narrative_weeks WHERE narrative_id = ? ORDER BY week_start""",
-            (nid,),
-        ).fetchall()
+        weeks = weeks_by_narrative.get(nid, [])
 
         if not weeks:
             continue  # leave significance_score as NULL
@@ -82,21 +87,15 @@ def compute_significance_scores(db_path: str) -> int:
         weeks_since_last = (current_date - datetime.fromisoformat(last_seen)).days / 7
         recency = max(0, 1 - weeks_since_last / 12)
 
-        # Normalize all components to 0-1 range before weighting:
-        # cum_share: cap at 100% total
-        # recent_share: already 0-100 range, normalize to 0-1
-        # peak_z: cap at 5 (extreme anomaly)
-        # recency: already 0-1
         norm_cum = min(cum_share / 100, 1.0)
         norm_recent = min(recent_share / 100, 1.0)
         norm_z = min(peak_z / 5, 1.0)
         score = 0.3 * norm_cum + 0.4 * norm_recent + 0.2 * norm_z + 0.1 * recency
 
-        conn.execute(
-            "UPDATE narratives SET significance_score = ? WHERE id = ?",
-            (round(score, 3), nid),
-        )
+        updates.append((round(score, 3), nid))
         count += 1
+
+    conn.executemany("UPDATE narratives SET significance_score = ? WHERE id = ?", updates)
 
     conn.commit()
     conn.close()
@@ -234,22 +233,16 @@ def get_timeline_with_other(
         date_filter += " AND nw.week_start <= ?"
         date_params.append(end)
 
-    # Get top-N narrative data
-    top_df = pd.read_sql_query(
+    # Single query: top-N rows returned individually, rest aggregated as "Other"
+    df = pd.read_sql_query(
         f"""SELECT nw.narrative_id, n.label, nw.week_start,
                    nw.article_count, nw.share_of_attention,
                    nw.z_score, nw.sentiment_mean
             FROM narrative_weeks nw
             JOIN narratives n ON n.id = nw.narrative_id
             WHERE nw.narrative_id IN ({placeholders}){date_filter}
-            ORDER BY nw.week_start, nw.share_of_attention DESC""",
-        conn,
-        params=top_ids + date_params,
-    )
-
-    # Aggregate "Other" bucket
-    other_df = pd.read_sql_query(
-        f"""SELECT
+        UNION ALL
+        SELECT
                 -1 as narrative_id,
                 'Other' as label,
                 nw.week_start,
@@ -261,14 +254,14 @@ def get_timeline_with_other(
             WHERE nw.narrative_id NOT IN ({placeholders}){date_filter}
             GROUP BY nw.week_start
             HAVING SUM(nw.article_count) > 0
-            ORDER BY nw.week_start""",
+        ORDER BY week_start, share_of_attention DESC""",
         conn,
-        params=top_ids + date_params,
+        params=top_ids + date_params + top_ids + date_params,
     )
 
     conn.close()
 
-    result = pd.concat([top_df, other_df], ignore_index=True)
+    result = df
     if not result.empty:
         result["week_start"] = pd.to_datetime(result["week_start"])
     return result
@@ -332,24 +325,18 @@ def get_articles_paginated(
 
 def get_stats(db_path: str) -> dict:
     conn = get_connection(db_path)
-    total_articles = conn.execute("SELECT COUNT(*) as cnt FROM articles").fetchone()["cnt"]
-    total_narratives = conn.execute("SELECT COUNT(*) as cnt FROM narratives").fetchone()["cnt"]
-    active_narratives = conn.execute(
-        "SELECT COUNT(*) as cnt FROM narratives WHERE status='active'"
-    ).fetchone()["cnt"]
-    dormant_narratives = conn.execute(
-        "SELECT COUNT(*) as cnt FROM narratives WHERE status='dormant'"
-    ).fetchone()["cnt"]
 
-    date_range = conn.execute(
-        "SELECT MIN(published_at) as first_date, MAX(published_at) as last_date FROM articles"
+    # Consolidated counts in a single query using CTEs
+    counts = conn.execute(
+        """SELECT
+               (SELECT COUNT(*) FROM articles) as total_articles,
+               (SELECT COUNT(*) FROM narratives) as total_narratives,
+               (SELECT COUNT(*) FROM narratives WHERE status='active') as active_narratives,
+               (SELECT COUNT(*) FROM narratives WHERE status='dormant') as dormant_narratives,
+               (SELECT MIN(published_at) FROM articles) as first_article_date,
+               (SELECT MAX(published_at) FROM articles) as last_article_date,
+               (SELECT COUNT(*) FROM articles a LEFT JOIN article_analysis aa ON aa.article_id = a.id WHERE aa.narrative_id IS NULL) as noise_count"""
     ).fetchone()
-
-    noise_count = conn.execute(
-        """SELECT COUNT(*) as cnt FROM articles a
-           LEFT JOIN article_analysis aa ON aa.article_id = a.id
-           WHERE aa.narrative_id IS NULL"""
-    ).fetchone()["cnt"]
 
     top_by_significance = [
         dict(r)
@@ -385,13 +372,13 @@ def get_stats(db_path: str) -> dict:
 
     conn.close()
     return {
-        "total_articles": total_articles,
-        "total_narratives": total_narratives,
-        "active_narratives": active_narratives,
-        "dormant_narratives": dormant_narratives,
-        "first_article_date": date_range["first_date"],
-        "last_article_date": date_range["last_date"],
-        "noise_count": noise_count,
+        "total_articles": counts["total_articles"],
+        "total_narratives": counts["total_narratives"],
+        "active_narratives": counts["active_narratives"],
+        "dormant_narratives": counts["dormant_narratives"],
+        "first_article_date": counts["first_article_date"],
+        "last_article_date": counts["last_article_date"],
+        "noise_count": counts["noise_count"],
         "top_by_significance": top_by_significance,
         "biggest_movers": biggest_movers,
         "longest_running": longest_running,

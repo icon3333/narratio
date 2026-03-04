@@ -1,6 +1,7 @@
 """SQLite database initialization and helpers."""
 
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 SCHEMA = """
@@ -70,6 +71,24 @@ CREATE TABLE IF NOT EXISTS economist_covers (
 );
 CREATE INDEX IF NOT EXISTS idx_covers_year ON economist_covers(year);
 CREATE INDEX IF NOT EXISTS idx_covers_date ON economist_covers(date DESC);
+
+-- article_analysis indexes (most critical — queried in cluster, label, sentiment, data, summarize)
+CREATE INDEX IF NOT EXISTS idx_aa_narrative_id ON article_analysis(narrative_id);
+CREATE INDEX IF NOT EXISTS idx_aa_embedding_index ON article_analysis(embedding_index);
+CREATE INDEX IF NOT EXISTS idx_aa_is_relevant ON article_analysis(is_relevant);
+CREATE INDEX IF NOT EXISTS idx_aa_cluster_id ON article_analysis(cluster_id);
+CREATE INDEX IF NOT EXISTS idx_aa_merged_cluster ON article_analysis(merged_cluster_id);
+
+-- articles indexes
+CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_articles_source ON articles(source);
+
+-- narrative_weeks indexes (critical for timeline/reporting)
+CREATE INDEX IF NOT EXISTS idx_nw_lookup ON narrative_weeks(narrative_id, week_start);
+CREATE INDEX IF NOT EXISTS idx_nw_week ON narrative_weeks(week_start DESC);
+
+-- narratives indexes
+CREATE INDEX IF NOT EXISTS idx_narratives_status ON narratives(status);
 """
 
 
@@ -114,4 +133,17 @@ def get_connection(db_path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, 2-3x faster writes
+    conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
+    conn.execute("PRAGMA temp_store=MEMORY")  # temp tables in RAM
     return conn
+
+
+@contextmanager
+def connection(db_path: str):
+    """Context manager for database connections — auto-closes on exit."""
+    conn = get_connection(db_path)
+    try:
+        yield conn
+    finally:
+        conn.close()

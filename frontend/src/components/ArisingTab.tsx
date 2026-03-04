@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fetchArising, ArisingNarrative } from "@/lib/api";
 
@@ -146,6 +146,20 @@ export default function ArisingTab() {
       .finally(() => setLoading(false));
   }, []);
 
+  const fastestGrowing = useMemo(() => {
+    if (data.length === 0) return null;
+    return data.reduce((a, b) => {
+      const aSlope = a.weekly_articles.length >= 2 ? a.weekly_articles[a.weekly_articles.length - 1] - a.weekly_articles[0] : 0;
+      const bSlope = b.weekly_articles.length >= 2 ? b.weekly_articles[b.weekly_articles.length - 1] - b.weekly_articles[0] : 0;
+      return bSlope > aSlope ? b : a;
+    });
+  }, [data]);
+
+  const strongestSignal = useMemo(() => {
+    if (data.length === 0) return null;
+    return data.reduce((a, b) => ((b.latest_share ?? 0) > (a.latest_share ?? 0) ? b : a));
+  }, [data]);
+
   if (loading) {
     return (
       <div className="fade-up" style={{ animationDelay: "0.08s" }}>
@@ -175,18 +189,6 @@ export default function ArisingTab() {
       </div>
     );
   }
-
-  const fastestGrowing = data.length > 0
-    ? data.reduce((a, b) => {
-        const aSlope = a.weekly_articles.length >= 2 ? a.weekly_articles[a.weekly_articles.length - 1] - a.weekly_articles[0] : 0;
-        const bSlope = b.weekly_articles.length >= 2 ? b.weekly_articles[b.weekly_articles.length - 1] - b.weekly_articles[0] : 0;
-        return bSlope > aSlope ? b : a;
-      })
-    : null;
-
-  const strongestSignal = data.length > 0
-    ? data.reduce((a, b) => ((b.latest_share ?? 0) > (a.latest_share ?? 0) ? b : a))
-    : null;
 
   return (
     <div className="fade-up" style={{ animationDelay: "0.08s" }}>

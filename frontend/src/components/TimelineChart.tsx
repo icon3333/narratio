@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { TimelinePoint, Cover, coverImageUrl } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 
@@ -70,20 +70,6 @@ export default function TimelineChart({ data, mode, covers }: Props) {
     return () => obs.disconnect();
   }, []);
 
-  if (data.length === 0) {
-    return (
-      <div style={{
-        textAlign: "center",
-        padding: "3rem 1rem",
-        color: "var(--text-secondary)",
-        fontSize: "0.85rem",
-        fontFamily: "var(--font-sans)",
-      }}>
-        No timeline data available. Run the pipeline to discover narratives.
-      </div>
-    );
-  }
-
   // Theme-aware chart colors
   const textColor = isDark ? "#f5f0eb" : "#1a1a1a";
   const secondaryColor = isDark ? "#a8a29e" : "#999";
@@ -96,41 +82,46 @@ export default function TimelineChart({ data, mode, covers }: Props) {
   const coverLineColor = isDark ? "rgba(200,200,200,0.3)" : "rgba(100,100,100,0.3)";
 
   // Filter out "Other" bucket — only show real narratives
-  const filtered = data.filter((d) => d.label !== "Other");
-  const labels = [...new Set(filtered.map((d) => d.label))];
+  const filtered = useMemo(() => data.filter((d) => d.label !== "Other"), [data]);
+  const labels = useMemo(() => [...new Set(filtered.map((d) => d.label))], [filtered]);
 
   // Compute date range from the actual data
-  const allDates = filtered.map((d) => new Date(d.week_start).getTime());
-  const minDate = Math.min(...allDates);
-  const maxDate = Math.max(...allDates);
-  const dateSpan = maxDate - minDate || 1;
+  const { minDate, maxDate, dateSpan } = useMemo(() => {
+    const allDates = filtered.map((d) => new Date(d.week_start).getTime());
+    const min = Math.min(...allDates);
+    const max = Math.max(...allDates);
+    return { minDate: min, maxDate: max, dateSpan: max - min || 1 };
+  }, [filtered]);
 
   // Compute cover thumbnail positions proportionally
   const plotWidth = containerW - MARGIN_L - MARGIN_R;
-  const thumbPositions = (covers && covers.length > 0 && plotWidth > 0)
-    ? covers
-        .map((cover) => {
-          const t = new Date(cover.date).getTime();
-          const frac = (t - minDate) / dateSpan;
-          const left = MARGIN_L + frac * plotWidth;
-          return { cover, left };
-        })
-        .filter(({ left }) => left >= MARGIN_L - THUMB_W / 2 && left <= MARGIN_L + plotWidth + THUMB_W / 2)
-    : [];
-  // Cover vertical line shapes
-  const coverShapes: Partial<Plotly.Shape>[] = covers?.length
-    ? covers.map((c) => ({
-        type: "line" as const,
-        x0: c.date,
-        x1: c.date,
-        y0: 0,
-        y1: 1,
-        yref: "paper" as const,
-        line: { color: coverLineColor, dash: "dot" as const, width: 1 },
-      }))
-    : [];
+  const thumbPositions = useMemo(() => {
+    if (!covers || covers.length === 0 || plotWidth <= 0) return [];
+    return covers
+      .map((cover) => {
+        const t = new Date(cover.date).getTime();
+        const frac = (t - minDate) / dateSpan;
+        const left = MARGIN_L + frac * plotWidth;
+        return { cover, left };
+      })
+      .filter(({ left }) => left >= MARGIN_L - THUMB_W / 2 && left <= MARGIN_L + plotWidth + THUMB_W / 2);
+  }, [covers, plotWidth, minDate, dateSpan]);
 
-  const sharedLayout: Partial<Plotly.Layout> = {
+  // Cover vertical line shapes
+  const coverShapes: Partial<Plotly.Shape>[] = useMemo(() => {
+    if (!covers?.length) return [];
+    return covers.map((c) => ({
+      type: "line" as const,
+      x0: c.date,
+      x1: c.date,
+      y0: 0,
+      y1: 1,
+      yref: "paper" as const,
+      line: { color: coverLineColor, dash: "dot" as const, width: 1 },
+    }));
+  }, [covers, coverLineColor]);
+
+  const sharedLayout: Partial<Plotly.Layout> = useMemo(() => ({
     height: 380,
     paper_bgcolor: "transparent",
     plot_bgcolor: "transparent",
@@ -167,193 +158,211 @@ export default function TimelineChart({ data, mode, covers }: Props) {
       tickfont: { size: 10, color: secondaryColor },
       zeroline: false,
     },
-  };
+  }), [isDark, textColor, secondaryColor, gridColor, lineColor]);
 
   const plotProps = {
     config: { responsive: true, displayModeBar: false } as Partial<Plotly.Config>,
     style: { width: "100%" },
   };
 
-  let traces: any[];
-  let layout: Partial<Plotly.Layout>;
+  const { traces, layout } = useMemo(() => {
+    let t: any[];
+    let l: Partial<Plotly.Layout>;
 
-  if (mode === "attention") {
-    const uniqueWeeks = [...new Set(filtered.map((d) => d.week_start))];
-    const useBars = uniqueWeeks.length <= 1;
+    if (mode === "attention") {
+      const uniqueWeeks = [...new Set(filtered.map((d) => d.week_start))];
+      const useBars = uniqueWeeks.length <= 1;
 
-    traces = labels.map((label, i) => {
-      const points = filtered.filter((d) => d.label === label);
-      const color = PALETTE[i % PALETTE.length];
-      if (useBars) {
+      t = labels.map((label, i) => {
+        const points = filtered.filter((d) => d.label === label);
+        const color = PALETTE[i % PALETTE.length];
+        if (useBars) {
+          return {
+            x: [label],
+            y: [points[0]?.share_of_attention ?? 0],
+            name: label,
+            type: "bar" as const,
+            marker: { color: color + "cc" },
+            hovertemplate: `<b>%{fullData.name}</b><br>%{y:.1f}%<extra></extra>`,
+          };
+        }
         return {
-          x: [label],
-          y: [points[0]?.share_of_attention ?? 0],
+          x: points.map((p) => p.week_start),
+          y: points.map((p) => p.share_of_attention),
           name: label,
-          type: "bar" as const,
-          marker: { color: color + "cc" },
+          type: "scatter" as const,
+          mode: "lines" as const,
+          stackgroup: "one",
+          groupnorm: "percent" as const,
+          line: { width: 0, shape: "spline" as const, smoothing: 1.3 },
+          fillcolor: color + "cc",
           hovertemplate: `<b>%{fullData.name}</b><br>%{y:.1f}%<extra></extra>`,
         };
-      }
-      return {
-        x: points.map((p) => p.week_start),
-        y: points.map((p) => p.share_of_attention),
-        name: label,
-        type: "scatter" as const,
-        mode: "lines" as const,
-        stackgroup: "one",
-        groupnorm: "percent" as const,
-        line: { width: 0, shape: "spline" as const, smoothing: 1.3 },
-        fillcolor: color + "cc",
-        hovertemplate: `<b>%{fullData.name}</b><br>%{y:.1f}%<extra></extra>`,
+      });
+
+      l = {
+        ...sharedLayout,
+        yaxis: {
+          ...sharedLayout.yaxis,
+          title: { text: "Share of Attention", font: { size: 11, color: secondaryColor } },
+          ticksuffix: "%",
+        },
+        ...(useBars ? { barmode: "group" as const } : {}),
+        shapes: [...coverShapes],
       };
-    });
+    } else {
+      // Z-Score mode
+      const uniqueWeeksZ = [...new Set(filtered.map((d) => d.week_start))];
+      const useBarsZ = uniqueWeeksZ.length <= 1;
 
-    layout = {
-      ...sharedLayout,
-      yaxis: {
-        ...sharedLayout.yaxis,
-        title: { text: "Share of Attention", font: { size: 11, color: secondaryColor } },
-        ticksuffix: "%",
-      },
-      ...(useBars ? { barmode: "group" as const } : {}),
-      shapes: [...coverShapes],
-    };
-  } else {
-    // Z-Score mode
-    const uniqueWeeksZ = [...new Set(filtered.map((d) => d.week_start))];
-    const useBarsZ = uniqueWeeksZ.length <= 1;
-
-    traces = labels.map((label, i) => {
-      const points = filtered.filter((d) => d.label === label);
-      if (useBarsZ) {
+      t = labels.map((label, i) => {
+        const points = filtered.filter((d) => d.label === label);
+        if (useBarsZ) {
+          return {
+            x: [label],
+            y: [points[0]?.z_score ?? 0],
+            name: label,
+            type: "bar" as const,
+            marker: { color: PALETTE[i % PALETTE.length] },
+            hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f}<extra></extra>`,
+          };
+        }
         return {
-          x: [label],
-          y: [points[0]?.z_score ?? 0],
+          x: points.map((p) => p.week_start),
+          y: points.map((p) => p.z_score),
           name: label,
-          type: "bar" as const,
-          marker: { color: PALETTE[i % PALETTE.length] },
+          type: "scatter" as const,
+          mode: "lines+markers" as const,
+          line: { color: PALETTE[i % PALETTE.length], width: 2 },
+          marker: { size: 4, color: PALETTE[i % PALETTE.length] },
           hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f}<extra></extra>`,
         };
-      }
-      return {
-        x: points.map((p) => p.week_start),
-        y: points.map((p) => p.z_score),
-        name: label,
-        type: "scatter" as const,
-        mode: "lines+markers" as const,
-        line: { color: PALETTE[i % PALETTE.length], width: 2 },
-        marker: { size: 4, color: PALETTE[i % PALETTE.length] },
-        hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f}<extra></extra>`,
+      });
+
+      const zScoreShapes = useBarsZ ? [] : [
+        { type: "rect" as const, y0: 1.5, y1: 2.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandColor, line: { width: 0 } },
+        { type: "rect" as const, y0: 2.0, y1: 4.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandStrongColor, line: { width: 0 } },
+        { type: "rect" as const, y0: -2.0, y1: -1.5, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandColor, line: { width: 0 } },
+        { type: "rect" as const, y0: -4.0, y1: -2.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandStrongColor, line: { width: 0 } },
+        { type: "line" as const, y0: 2.0, y1: 2.0, x0: 0, x1: 1, xref: "paper" as const, line: { color: thresholdColor, dash: "dot" as const, width: 1 } },
+        { type: "line" as const, y0: -2.0, y1: -2.0, x0: 0, x1: 1, xref: "paper" as const, line: { color: thresholdColor, dash: "dot" as const, width: 1 } },
+      ];
+
+      l = {
+        ...sharedLayout,
+        ...(useBarsZ ? { barmode: "group" as const } : {}),
+        yaxis: {
+          ...sharedLayout.yaxis,
+          title: { text: "Z-Score", font: { size: 11, color: secondaryColor } },
+          zeroline: true,
+          zerolinecolor: zerolineColor,
+        },
+        shapes: [...zScoreShapes, ...coverShapes],
       };
-    });
+    }
 
-    const zScoreShapes = useBarsZ ? [] : [
-      { type: "rect" as const, y0: 1.5, y1: 2.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandColor, line: { width: 0 } },
-      { type: "rect" as const, y0: 2.0, y1: 4.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandStrongColor, line: { width: 0 } },
-      { type: "rect" as const, y0: -2.0, y1: -1.5, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandColor, line: { width: 0 } },
-      { type: "rect" as const, y0: -4.0, y1: -2.0, x0: 0, x1: 1, xref: "paper" as const, fillcolor: bandStrongColor, line: { width: 0 } },
-      { type: "line" as const, y0: 2.0, y1: 2.0, x0: 0, x1: 1, xref: "paper" as const, line: { color: thresholdColor, dash: "dot" as const, width: 1 } },
-      { type: "line" as const, y0: -2.0, y1: -2.0, x0: 0, x1: 1, xref: "paper" as const, line: { color: thresholdColor, dash: "dot" as const, width: 1 } },
-    ];
-
-    layout = {
-      ...sharedLayout,
-      ...(useBarsZ ? { barmode: "group" as const } : {}),
-      yaxis: {
-        ...sharedLayout.yaxis,
-        title: { text: "Z-Score", font: { size: 11, color: secondaryColor } },
-        zeroline: true,
-        zerolinecolor: zerolineColor,
-      },
-      shapes: [...zScoreShapes, ...coverShapes],
-    };
-  }
+    return { traces: t, layout: l };
+  }, [filtered, labels, mode, coverShapes, sharedLayout, secondaryColor, bandColor, bandStrongColor, thresholdColor, zerolineColor]);
 
   return (
     <div ref={wrapperRef} style={{ position: "relative" }}>
-      {/* Cover thumbnail strip — always reserve space when covers exist to prevent layout shift */}
-      {covers && covers.length > 0 && (
-        <div style={{ position: "relative", height: 50, marginBottom: -4, pointerEvents: "none" }}>
-          {thumbPositions.map(({ cover, left }) => {
-            const isZoomed = zoomState?.id === cover.id;
-            const isHovered = hoveredCoverId === cover.id && !isZoomed;
-            const showLabel = isHovered || isZoomed;
-            return (
-              <div
-                key={cover.id}
-                onMouseEnter={() => setHoveredCoverId(cover.id)}
-                onMouseLeave={() => setHoveredCoverId(null)}
-                onClick={(e) => handleThumbClick(cover, e)}
-                style={{
-                  position: "absolute",
-                  top: 4,
-                  left: left - THUMB_W / 2,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  pointerEvents: "auto",
-                  zIndex: isZoomed ? 1000 : isHovered ? 100 : 10,
-                  transform: isZoomed ? zoomState.transform : "none",
-                  transition: "transform 0.25s ease",
-                  cursor: "pointer",
-                }}
-              >
-                <img
-                  src={coverImageUrl(cover.image_url, true)}
-                  alt={`Economist ${cover.date}`}
-                  width={THUMB_W}
-                  height={THUMB_H}
-                  loading="eager"
-                  onLoad={() => setLoadedCovers(prev => { const next = new Set(prev); next.add(cover.id); return next; })}
-                  style={{
-                    display: "block",
-                    borderRadius: 2,
-                    border: `1px solid ${isHovered || isZoomed ? "var(--red)" : "var(--border)"}`,
-                    objectFit: "cover",
-                    opacity: loadedCovers.has(cover.id) ? 1 : 0,
-                    transition: "opacity 0.15s ease, transform 0.2s ease, box-shadow 0.2s ease",
-                    transform: isHovered ? "scale(4)" : "none",
-                    transformOrigin: "top center",
-                    boxShadow: isZoomed
-                      ? "0 8px 40px rgba(0,0,0,0.5)"
-                      : isHovered
-                        ? "0 4px 20px rgba(0,0,0,0.3)"
-                        : "none",
-                  }}
-                />
-                <span
-                  style={{
-                    fontFamily: "var(--font-sans)",
-                    fontSize: showLabel ? "0.6rem" : 0,
-                    color: "var(--text-secondary)",
-                    whiteSpace: "nowrap",
-                    opacity: showLabel ? 1 : 0,
-                    transition: "opacity 0.15s ease, font-size 0.15s ease",
-                    pointerEvents: "none",
-                    marginTop: 2,
-                  }}
-                >
-                  {new Date(cover.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                </span>
-              </div>
-            );
-          })}
+      {data.length === 0 ? (
+        <div style={{
+          textAlign: "center",
+          padding: "3rem 1rem",
+          color: "var(--text-secondary)",
+          fontSize: "0.85rem",
+          fontFamily: "var(--font-sans)",
+        }}>
+          No timeline data available. Run the pipeline to discover narratives.
         </div>
+      ) : (
+        <>
+          {/* Cover thumbnail strip — always reserve space when covers exist to prevent layout shift */}
+          {covers && covers.length > 0 && (
+            <div style={{ position: "relative", height: 50, marginBottom: -4, pointerEvents: "none" }}>
+              {thumbPositions.map(({ cover, left }) => {
+                const isZoomed = zoomState?.id === cover.id;
+                const isHovered = hoveredCoverId === cover.id && !isZoomed;
+                const showLabel = isHovered || isZoomed;
+                return (
+                  <div
+                    key={cover.id}
+                    onMouseEnter={() => setHoveredCoverId(cover.id)}
+                    onMouseLeave={() => setHoveredCoverId(null)}
+                    onClick={(e) => handleThumbClick(cover, e)}
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      left: left - THUMB_W / 2,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      pointerEvents: "auto",
+                      zIndex: isZoomed ? 1000 : isHovered ? 100 : 10,
+                      transform: isZoomed ? zoomState.transform : "none",
+                      transition: "transform 0.25s ease",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <img
+                      src={coverImageUrl(cover.image_url, true)}
+                      alt={`Economist ${cover.date}`}
+                      width={THUMB_W}
+                      height={THUMB_H}
+                      loading="lazy"
+                      onLoad={() => setLoadedCovers(prev => { const next = new Set(prev); next.add(cover.id); return next; })}
+                      style={{
+                        display: "block",
+                        borderRadius: 2,
+                        border: `1px solid ${isHovered || isZoomed ? "var(--red)" : "var(--border)"}`,
+                        objectFit: "cover",
+                        opacity: loadedCovers.has(cover.id) ? 1 : 0,
+                        transition: "opacity 0.15s ease, transform 0.2s ease, box-shadow 0.2s ease",
+                        transform: isHovered ? "scale(4)" : "none",
+                        transformOrigin: "top center",
+                        boxShadow: isZoomed
+                          ? "0 8px 40px rgba(0,0,0,0.5)"
+                          : isHovered
+                            ? "0 4px 20px rgba(0,0,0,0.3)"
+                            : "none",
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontFamily: "var(--font-sans)",
+                        fontSize: showLabel ? "0.6rem" : 0,
+                        color: "var(--text-secondary)",
+                        whiteSpace: "nowrap",
+                        opacity: showLabel ? 1 : 0,
+                        transition: "opacity 0.15s ease, font-size 0.15s ease",
+                        pointerEvents: "none",
+                        marginTop: 2,
+                      }}
+                    >
+                      {new Date(cover.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {zoomState !== null && (
+            <div
+              onClick={() => setZoomState(null)}
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 999,
+                background: "rgba(0, 0, 0, 0.7)",
+                cursor: "pointer",
+                animation: "fadeIn 0.2s ease",
+              }}
+            />
+          )}
+          <Plot data={traces} layout={layout} {...plotProps} />
+        </>
       )}
-      {zoomState !== null && (
-        <div
-          onClick={() => setZoomState(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 999,
-            background: "rgba(0, 0, 0, 0.7)",
-            cursor: "pointer",
-            animation: "fadeIn 0.2s ease",
-          }}
-        />
-      )}
-      <Plot data={traces} layout={layout} {...plotProps} />
     </div>
   );
 }

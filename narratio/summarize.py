@@ -111,7 +111,9 @@ def compute_weekly_analytics(db_path: str, z_score_window: int = 8) -> int:
         for ws, articles in sorted(weeks_data.items()):
             article_count = len(articles)
             # Use clustered count as denominator (not total including noise)
-            clustered_total = weekly_clustered_counts.get(ws, 1)
+            clustered_total = weekly_clustered_counts.get(ws, 0)
+            if clustered_total == 0:
+                continue  # skip weeks with no clustered articles
             share = (article_count / clustered_total) * 100
 
             sentiments = [a["sentiment_score"] for a in articles if a["sentiment_score"] is not None]
@@ -285,8 +287,10 @@ def _compute_z_scores(conn, window: int = 8):
         week_starts = [w["week_start"] for w in weeks]
 
         for i, (ws, share) in enumerate(zip(week_starts, shares)):
+            # Lookback window: use preceding weeks to compute baseline, then
+            # measure how anomalous the current week is relative to that baseline
             start = max(0, i - window)
-            window_shares = shares[start:i] if i > 0 else shares[:1]
+            window_shares = shares[start:i + 1]
 
             if len(window_shares) < 2:
                 z = 0.0

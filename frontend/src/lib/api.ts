@@ -199,8 +199,8 @@ export interface CoversResponse {
 
 export function coverImageUrl(url: string, thumb = false): string {
   const optimized = thumb
-    ? url.replace("width=1424", "width=120").replace("quality=80", "quality=60")
-    : url.replace("width=1424", "width=960");
+    ? url.replace("width=1424", "width=400").replace("quality=80", "quality=70")
+    : url;
   return `${API_BASE}/api/covers/image-proxy?url=${encodeURIComponent(optimized)}`;
 }
 

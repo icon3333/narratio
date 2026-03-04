@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import TimelineChart from "@/components/TimelineChart";
 import NarrativeTable from "@/components/NarrativeTable";
 import ArticlesTab from "@/components/ArticlesTab";
@@ -83,22 +83,24 @@ export default function Dashboard() {
     : 0;
 
   // Rank narratives by total article count across timeline points (most dominant first)
-  const labelTotals = new Map<string, { count: number; ids: Set<number> }>();
-  timeline
-    .filter((d) => d.label !== "Other")
-    .forEach((d) => {
-      const entry = labelTotals.get(d.label) || { count: 0, ids: new Set<number>() };
-      entry.count += d.article_count;
-      entry.ids.add(d.narrative_id);
-      labelTotals.set(d.label, entry);
-    });
-  const MAX_NARRATIVES = 10;
-  const narrativeIds = new Set(narratives.map((n) => n.id));
-  const rankedLabels = [...labelTotals.entries()]
-    .sort((a, b) => b[1].count - a[1].count)
-    .filter(([, entry]) => [...entry.ids].some((id) => narrativeIds.has(id)))
-    .slice(0, MAX_NARRATIVES)
-    .map(([label, entry]) => ({ label, ids: entry.ids }));
+  const rankedLabels = useMemo(() => {
+    const labelTotals = new Map<string, { count: number; ids: Set<number> }>();
+    timeline
+      .filter((d) => d.label !== "Other")
+      .forEach((d) => {
+        const entry = labelTotals.get(d.label) || { count: 0, ids: new Set<number>() };
+        entry.count += d.article_count;
+        entry.ids.add(d.narrative_id);
+        labelTotals.set(d.label, entry);
+      });
+    const MAX_NARRATIVES = 10;
+    const narrativeIds = new Set(narratives.map((n) => n.id));
+    return [...labelTotals.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .filter(([, entry]) => [...entry.ids].some((id) => narrativeIds.has(id)))
+      .slice(0, MAX_NARRATIVES)
+      .map(([label, entry]) => ({ label, ids: entry.ids }));
+  }, [timeline, narratives]);
 
   const [visibleCount, setVisibleCount] = useState(0);
 
@@ -107,9 +109,18 @@ export default function Dashboard() {
     setVisibleCount(rankedLabels.length);
   }, [rankedLabels.length]);
 
-  const visibleLabels = new Set(rankedLabels.slice(0, visibleCount).map((r) => r.label));
-  const visibleIds = new Set(rankedLabels.slice(0, visibleCount).flatMap((r) => [...r.ids]));
-  const filteredTimeline = timeline.filter((d) => visibleLabels.has(d.label));
+  const visibleLabels = useMemo(
+    () => new Set(rankedLabels.slice(0, visibleCount).map((r) => r.label)),
+    [rankedLabels, visibleCount],
+  );
+  const visibleIds = useMemo(
+    () => new Set(rankedLabels.slice(0, visibleCount).flatMap((r) => [...r.ids])),
+    [rankedLabels, visibleCount],
+  );
+  const filteredTimeline = useMemo(
+    () => timeline.filter((d) => visibleLabels.has(d.label)),
+    [timeline, visibleLabels],
+  );
 
   // Filter covers to current time range
   const visibleCovers = (() => {
