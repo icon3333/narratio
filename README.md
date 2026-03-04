@@ -55,6 +55,28 @@ Open **http://localhost:3000** and you should see the dashboard.
 - **REST API** — query everything programmatically
 - **Backfill** — ingest historical data going back months
 
+## Screenshots
+
+### Timeline — Share of Attention
+![Timeline view](docs/screenshots/history.png)
+The main view: a stacked area chart tracking how much attention each narrative commands week by week, with Economist covers pinned along the timeline.
+
+### Arising Narratives
+![Arising narratives](docs/screenshots/arising.png)
+Spot emerging themes early — ranked by article count, attention share, and trend direction with inline trajectory sparklines.
+
+### Articles Database
+![Articles browser](docs/screenshots/articles%20database.png)
+Browse and search the full headline database across sources.
+
+### Economist Covers
+![Economist covers gallery](docs/screenshots/covers.png)
+A visual timeline of Economist magazine covers — click to zoom.
+
+### Stats Overview
+![Stats dashboard](docs/screenshots/stats.png)
+High-level dashboard metrics: total articles, active narratives, date range, noise ratio, plus leaderboards for significance, momentum, and longevity.
+
 ## How It Works
 
 The pipeline runs in roughly this order:
