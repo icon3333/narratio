@@ -58,6 +58,18 @@ CREATE TABLE IF NOT EXISTS weekly_totals (
     total_clustered INTEGER NOT NULL DEFAULT 0,
     total_noise INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS economist_covers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL UNIQUE,
+    title TEXT,
+    image_url TEXT NOT NULL,
+    edition_url TEXT,
+    year INTEGER NOT NULL,
+    scraped_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_covers_year ON economist_covers(year);
+CREATE INDEX IF NOT EXISTS idx_covers_date ON economist_covers(date DESC);
 """
 
 

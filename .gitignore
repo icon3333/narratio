@@ -6,3 +6,5 @@ data/
 .idea/
 .vscode/
 *.swp
+.DS_Store
+node_modules/

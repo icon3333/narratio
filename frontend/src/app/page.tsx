@@ -6,6 +6,7 @@ import NarrativeTable from "@/components/NarrativeTable";
 import ArticlesTab from "@/components/ArticlesTab";
 import StatsTab from "@/components/StatsTab";
 import ArisingTab from "@/components/ArisingTab";
+import CoversTab from "@/components/CoversTab";
 import {
   fetchNarratives,
   fetchTimeline,
@@ -37,7 +38,7 @@ function SkeletonTable() {
   );
 }
 
-type TabKey = "arising" | "history" | "articles" | "stats";
+type TabKey = "arising" | "history" | "articles" | "covers" | "stats";
 type TimeRange = "all" | "1y" | "quarter" | "month";
 
 function getTimeRangeParams(range: TimeRange): { start?: string } {
@@ -178,7 +179,7 @@ export default function Dashboard() {
     <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
       {/* Tab Bar */}
       <div className="tab-bar fade-up">
-        {(["arising", "history", "articles", "stats"] as TabKey[]).map((tab) => (
+        {(["arising", "history", "articles", "covers", "stats"] as TabKey[]).map((tab) => (
           <button
             key={tab}
             className={activeTab === tab ? "tab-active" : ""}
@@ -191,6 +192,7 @@ export default function Dashboard() {
 
       {activeTab === "arising" && <ArisingTab />}
       {activeTab === "articles" && <ArticlesTab />}
+      {activeTab === "covers" && <CoversTab />}
       {activeTab === "stats" && <StatsTab />}
 
       {activeTab === "history" && error && (

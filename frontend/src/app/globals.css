@@ -415,6 +415,139 @@ body {
   margin-bottom: 0.75rem;
 }
 
+/* ---- Covers Grid ---- */
+.covers-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .covers-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (max-width: 768px) {
+  .covers-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 480px) {
+  .covers-grid { grid-template-columns: 1fr; }
+}
+
+.cover-card {
+  background: var(--bg-card);
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+  cursor: pointer;
+  transition: box-shadow 0.2s ease, transform 0.25s ease;
+}
+
+.cover-card:hover {
+  box-shadow: var(--card-hover);
+  transform: translateY(-2px);
+}
+
+.cover-card img {
+  width: 100%;
+  aspect-ratio: 51 / 66;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-card .cover-info {
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.cover-card .cover-date {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.cover-card .cover-link {
+  color: var(--text-secondary);
+  transition: color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.cover-card .cover-link:hover {
+  color: var(--red);
+}
+
+.cover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(0, 0, 0, 0.7);
+  cursor: pointer;
+  animation: fadeIn 0.2s ease;
+}
+
+.cover-card--zoomed {
+  position: relative;
+  z-index: 1000;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
+.cover-card--zoomed:hover {
+  transform: inherit;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.cover-skeleton {
+  background: var(--bg-card);
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+.cover-skeleton .cover-skeleton-img {
+  width: 100%;
+  aspect-ratio: 51 / 66;
+}
+
+.cover-skeleton .cover-skeleton-text {
+  padding: 0.6rem 0.75rem;
+  height: 32px;
+}
+
+.covers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.covers-header select {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.covers-header select:focus {
+  border-color: var(--red);
+}
+
 /* ---- Utility ---- */
 .fade-up {
   animation: fadeUp 0.5s ease forwards;

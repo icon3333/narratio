@@ -3,9 +3,12 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+import httpx
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pathlib import Path
 
 from narratio.data import (
@@ -53,7 +56,7 @@ app = FastAPI(title="Narratio API", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -211,7 +214,7 @@ def _finish_pipeline() -> None:
 
 
 def _run_pipeline_task():
-    _start_pipeline(total_steps=11)
+    _start_pipeline(total_steps=12)
     try:
         from narratio.config import get_config
         from narratio.pipeline import run_pipeline
@@ -248,3 +251,112 @@ def _run_analysis_task():
         _pipeline_status["last_result"] = f"error: {e}"
     finally:
         _finish_pipeline()
+
+
+# ---- Economist Covers ----
+
+_covers_lock = asyncio.Lock()
+_covers_status = {"running": False}
+
+
+@app.get("/api/covers")
+def list_covers(
+    year: int | None = None,
+    page: int = 1,
+    per_page: int = 60,
+):
+    try:
+        conn = get_connection(DB_PATH)
+        # Check if table exists
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='economist_covers'"
+        ).fetchall()]
+        if "economist_covers" not in tables:
+            conn.close()
+            return {"covers": [], "total": 0, "page": page, "per_page": per_page, "years": []}
+
+        where = "WHERE year = ?" if year else ""
+        params: list = [year] if year else []
+
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM economist_covers {where}", params
+        ).fetchone()[0]
+
+        offset = (page - 1) * per_page
+        rows = conn.execute(
+            f"""SELECT id, date, title, image_url, edition_url, year
+                FROM economist_covers {where}
+                ORDER BY date DESC LIMIT ? OFFSET ?""",
+            params + [per_page, offset],
+        ).fetchall()
+
+        years = [r[0] for r in conn.execute(
+            "SELECT DISTINCT year FROM economist_covers ORDER BY year DESC"
+        ).fetchall()]
+
+        conn.close()
+
+        covers = [
+            {"id": r[0], "date": r[1], "title": r[2], "image_url": r[3],
+             "edition_url": r[4], "year": r[5]}
+            for r in rows
+        ]
+        return {"covers": covers, "total": total, "page": page, "per_page": per_page, "years": years}
+    except Exception as e:
+        logger.error("Failed to list covers: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/covers/image-proxy")
+async def cover_image_proxy(url: str = Query(...)):
+    if "economist.com" not in url:
+        raise HTTPException(status_code=400, detail="Invalid image URL")
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                  "Chrome/121.0.0.0 Safari/537.36",
+                    "Referer": "https://www.economist.com/",
+                    "Accept": "image/*,*/*",
+                },
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+        content_type = resp.headers.get("content-type", "image/jpeg")
+        return Response(
+            content=resp.content,
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=604800"},
+        )
+    except httpx.HTTPError as e:
+        logger.error("Image proxy failed: %s", e)
+        raise HTTPException(status_code=502, detail="Failed to fetch image")
+
+
+@app.post("/api/covers/refresh")
+async def refresh_covers(
+    background_tasks: BackgroundTasks,
+    year: int | None = None,
+):
+    async with _covers_lock:
+        if _covers_status["running"]:
+            return {"status": "already_running"}
+        _covers_status["running"] = True
+
+    target_year = year or datetime.now().year
+    background_tasks.add_task(_run_covers_scrape, target_year)
+    return {"status": "started", "year": target_year}
+
+
+def _run_covers_scrape(year: int):
+    try:
+        from narratio.scrape_covers import scrape_covers
+        count = scrape_covers(DB_PATH, year=year)
+        logger.info("Cover scrape complete: %d covers for %d", count, year)
+    except Exception as e:
+        logger.error("Cover scrape failed: %s", e)
+    finally:
+        _covers_status["running"] = False

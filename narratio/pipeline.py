@@ -129,13 +129,13 @@ def run_pipeline(
     console.print("=" * 40)
 
     cb(1, "Initializing database...")
-    console.print("\n[bold]1/11 Initializing database...[/bold]")
+    console.print("\n[bold]1/12 Initializing database...[/bold]")
     init_db(cfg.db_path)
     console.print("  Done")
 
     # --- Ingest from all available sources ---
     cb(2, "Ingesting articles...")
-    console.print(f"\n[bold]2/11 Ingesting articles ({year}-{month:02d})...[/bold]")
+    console.print(f"\n[bold]2/12 Ingesting articles ({year}-{month:02d})...[/bold]")
     total_ingested = 0
 
     if cfg.nyt_api_key:
@@ -156,9 +156,19 @@ def run_pipeline(
 
     console.print(f"  [bold]Total: {total_ingested} new articles[/bold]")
 
-    # --- Run analysis pipeline (steps 3-11) ---
+    # --- Scrape Economist covers (non-blocking) ---
+    cb(3, "Scraping Economist covers...")
+    console.print("\n[bold]3/12 Scraping Economist covers...[/bold]")
+    try:
+        from narratio.scrape_covers import scrape_covers
+        n_covers = scrape_covers(cfg.db_path, year=year)
+        console.print(f"  Found {n_covers} covers")
+    except Exception as e:
+        console.print(f"  [dim]Skipped (Playwright not available or scrape failed: {e})[/dim]")
+
+    # --- Run analysis pipeline (steps 4-12) ---
     def _offset_cb(step: int, label: str) -> None:
-        cb(step + 2, label)
+        cb(step + 3, label)
 
     run_analysis(cfg, progress_callback=_offset_cb)
 

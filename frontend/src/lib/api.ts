@@ -177,3 +177,44 @@ export async function fetchPipelineStatus(): Promise<PipelineStatus> {
   if (!res.ok) throw new Error(`Pipeline status failed: ${res.status}`);
   return res.json();
 }
+
+// ---- Economist Covers ----
+
+export interface Cover {
+  id: number;
+  date: string;
+  title: string | null;
+  image_url: string;
+  edition_url: string | null;
+  year: number;
+}
+
+export interface CoversResponse {
+  covers: Cover[];
+  total: number;
+  page: number;
+  per_page: number;
+  years: number[];
+}
+
+export function coverImageUrl(url: string): string {
+  const optimized = url.replace("width=1424", "width=960");
+  return `${API_BASE}/api/covers/image-proxy?url=${encodeURIComponent(optimized)}`;
+}
+
+export async function fetchCovers(year?: number, page?: number): Promise<CoversResponse> {
+  const params = new URLSearchParams();
+  if (year) params.set("year", year.toString());
+  if (page) params.set("page", page.toString());
+  const res = await fetch(`${API_BASE}/api/covers?${params}`);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function refreshCovers(year?: number): Promise<{ status: string; year: number }> {
+  const params = new URLSearchParams();
+  if (year) params.set("year", year.toString());
+  const res = await fetch(`${API_BASE}/api/covers/refresh?${params}`, { method: "POST" });
+  if (!res.ok) throw new Error(`Cover refresh failed: ${res.status}`);
+  return res.json();
+}
