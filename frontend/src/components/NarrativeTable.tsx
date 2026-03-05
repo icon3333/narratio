@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Narrative } from "@/lib/api";
+import { formatDate } from "@/lib/format";
+import { Th, Td } from "@/components/Table";
 
 interface Props {
   narratives: Narrative[];
@@ -147,36 +149,3 @@ function NarrativeRow({ narrative: n, index, dimmed }: { narrative: Narrative; i
   );
 }
 
-function Th({ children, align, width }: { children: React.ReactNode; align: "left" | "right"; width?: number }) {
-  return (
-    <th style={{
-      textAlign: align,
-      padding: "0.6rem 0.75rem",
-      fontWeight: 500,
-      fontSize: "0.7rem",
-      letterSpacing: "0.1em",
-      textTransform: "uppercase",
-      color: "var(--text-secondary)",
-      width,
-    }}>
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, align, style }: { children: React.ReactNode; align: "left" | "right"; style?: React.CSSProperties }) {
-  return (
-    <td style={{
-      textAlign: align,
-      padding: "0.65rem 0.75rem",
-      ...style,
-    }}>
-      {children}
-    </td>
-  );
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}

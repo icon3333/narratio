@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fetchArising, ArisingNarrative } from "@/lib/api";
+import { Th, Td } from "@/components/Table";
 
 function Sparkline({ data, trend }: { data: number[]; trend: string }) {
   if (data.length === 0) return <span style={{ color: "var(--text-secondary)" }}>—</span>;
@@ -71,8 +72,8 @@ function TrendBadge({ trend }: { trend: string }) {
     },
     fading: {
       label: "Fading",
-      color: "var(--text-secondary)",
-      bg: "var(--bg-badge-dormant)",
+      color: "var(--red)",
+      bg: "rgba(180,60,60,0.1)",
     },
   }[trend] || { label: trend, color: "var(--text-secondary)", bg: "var(--bg-badge-dormant)" };
 
@@ -93,39 +94,6 @@ function TrendBadge({ trend }: { trend: string }) {
     >
       {config.label}
     </span>
-  );
-}
-
-function Th({ children, align, width }: { children: React.ReactNode; align: "left" | "right" | "center"; width?: number }) {
-  return (
-    <th
-      style={{
-        textAlign: align,
-        padding: "0.6rem 0.75rem",
-        fontWeight: 500,
-        fontSize: "0.7rem",
-        letterSpacing: "0.1em",
-        textTransform: "uppercase",
-        color: "var(--text-secondary)",
-        width,
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, align, style }: { children: React.ReactNode; align: "left" | "right" | "center"; style?: React.CSSProperties }) {
-  return (
-    <td
-      style={{
-        textAlign: align,
-        padding: "0.65rem 0.75rem",
-        ...style,
-      }}
-    >
-      {children}
-    </td>
   );
 }
 
@@ -174,20 +142,7 @@ export default function ArisingTab() {
   }
 
   if (error || !data) {
-    return (
-      <div
-        style={{
-          padding: "0.75rem 1rem",
-          background: "var(--bg-error)",
-          border: "1px solid var(--border-error)",
-          borderRadius: 3,
-          fontSize: "0.8rem",
-          color: "var(--text-error)",
-        }}
-      >
-        {error || "No data available."}
-      </div>
-    );
+    return <div className="error-box">{error || "No data available."}</div>;
   }
 
   return (

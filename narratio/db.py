@@ -2,6 +2,7 @@
 
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 SCHEMA = """
@@ -147,3 +148,34 @@ def connection(db_path: str):
         yield conn
     finally:
         conn.close()
+
+
+def parse_datetime(s: str) -> datetime:
+    """Parse ISO datetime string, handling +0000 offset format."""
+    return datetime.fromisoformat(s.replace("+0000", "+00:00"))
+
+
+def insert_article(conn: sqlite3.Connection, parsed: dict) -> bool:
+    """Insert article dict. Returns True if inserted, False if duplicate."""
+    try:
+        conn.execute(
+            """INSERT INTO articles
+               (source_id, headline, summary, source, url, published_at,
+                keywords, category, news_desk, word_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                parsed["source_id"],
+                parsed["headline"],
+                parsed["summary"],
+                parsed["source"],
+                parsed["url"],
+                parsed["published_at"],
+                parsed["keywords"],
+                parsed["category"],
+                parsed["news_desk"],
+                parsed["word_count"],
+            ),
+        )
+        return True
+    except sqlite3.IntegrityError:
+        return False

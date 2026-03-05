@@ -10,15 +10,15 @@
   --red:               #E3120B;
   --black:             #1a1a1a;
   --warm-white:        #f7f5f2;
-  --grey:              #999;
+  --grey:              #666;
   --light-grey:        #e8e5e1;
 
   --bg-page:           #f7f5f2;
   --bg-card:           #ffffff;
   --bg-header:         rgba(247,245,242,0.92);
   --text-primary:      #1a1a1a;
-  --text-secondary:    #999999;
-  --text-tertiary:     #666666;
+  --text-secondary:    #666666;
+  --text-tertiary:     #555555;
   --border:            #e8e5e1;
   --border-subtle:     rgba(0,0,0,0.04);
   --bg-hover:          rgba(0,0,0,0.015);
@@ -32,7 +32,7 @@
 
   --sentiment-positive: #5b7553;
   --sentiment-negative: #E3120B;
-  --sentiment-neutral:  #999;
+  --sentiment-neutral:  #666;
 
   --skeleton-base:     #eee;
   --skeleton-shine:    #e0ddd8;
@@ -599,6 +599,17 @@ body {
   border-color: var(--red);
 }
 
+
+/* ---- Error Box ---- */
+.error-box {
+  padding: 0.75rem 1rem;
+  background: var(--bg-error);
+  border: 1px solid var(--border-error);
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  color: var(--text-error);
+}
 
 /* ---- Utility ---- */
 .fade-up {

@@ -2,10 +2,9 @@
 
 import json
 import logging
-import sqlite3
 import time
 import httpx
-from narratio.db import get_connection
+from narratio.db import get_connection, insert_article
 
 logger = logging.getLogger(__name__)
 
@@ -90,27 +89,9 @@ def ingest_month(
             parsed = parse_guardian_article(raw)
             if parsed is None:
                 continue
-            try:
-                conn.execute(
-                    """INSERT INTO articles
-                       (source_id, headline, summary, source, url, published_at,
-                        keywords, category, news_desk, word_count)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        parsed["source_id"],
-                        parsed["headline"],
-                        parsed["summary"],
-                        parsed["source"],
-                        parsed["url"],
-                        parsed["published_at"],
-                        parsed["keywords"],
-                        parsed["category"],
-                        parsed["news_desk"],
-                        parsed["word_count"],
-                    ),
-                )
+            if insert_article(conn, parsed):
                 inserted += 1
-            except sqlite3.IntegrityError:
+            else:
                 skipped += 1
 
         page += 1

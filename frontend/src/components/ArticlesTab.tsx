@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { fetchArticles, Article, ArticlesResponse } from "@/lib/api";
+import { fetchArticles, fetchSources, Article, ArticlesResponse } from "@/lib/api";
+import { formatDate } from "@/lib/format";
+import { Th, Td } from "@/components/Table";
 
 export default function ArticlesTab() {
   const [data, setData] = useState<ArticlesResponse | null>(null);
@@ -24,11 +26,6 @@ export default function ArticlesTab() {
         search: search || undefined,
       });
       setData(res);
-      // Collect unique sources from first load
-      if (sources.length === 0 && res.articles.length > 0) {
-        const unique = [...new Set(res.articles.map((a) => a.source).filter(Boolean))].sort();
-        if (unique.length > 0) setSources(unique);
-      }
     } catch {
       setError("Failed to load articles.");
     }
@@ -39,15 +36,9 @@ export default function ArticlesTab() {
     load();
   }, [load]);
 
-  // Also fetch sources from a broader query on mount
+  // Fetch available sources from dedicated endpoint on mount
   useEffect(() => {
-    fetchArticles({ page: 1, per_page: 1 }).then(() => {
-      // Get a large sample to discover sources
-      fetchArticles({ page: 1, per_page: 200 }).then((res) => {
-        const unique = [...new Set(res.articles.map((a) => a.source).filter(Boolean))].sort();
-        if (unique.length > 0) setSources(unique);
-      }).catch(() => {});
-    }).catch(() => {});
+    fetchSources().then(setSources).catch(() => {});
   }, []);
 
   function handleSearch(e: React.FormEvent) {
@@ -123,19 +114,7 @@ export default function ArticlesTab() {
         </form>
 
         {error && (
-          <div
-            style={{
-              padding: "0.75rem 1rem",
-              background: "var(--bg-error)",
-              border: "1px solid var(--border-error)",
-              borderRadius: 3,
-              fontSize: "0.8rem",
-              color: "var(--text-error)",
-              marginBottom: "1rem",
-            }}
-          >
-            {error}
-          </div>
+          <div className="error-box" style={{ marginBottom: "1rem" }}>{error}</div>
         )}
 
         {loading ? (
@@ -228,39 +207,3 @@ export default function ArticlesTab() {
   );
 }
 
-function Th({ children, align }: { children: React.ReactNode; align: "left" | "right" }) {
-  return (
-    <th
-      style={{
-        textAlign: align,
-        padding: "0.6rem 0.75rem",
-        fontWeight: 500,
-        fontSize: "0.7rem",
-        letterSpacing: "0.1em",
-        textTransform: "uppercase",
-        color: "var(--text-secondary)",
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  align,
-  style,
-}: {
-  children: React.ReactNode;
-  align: "left" | "right";
-  style?: React.CSSProperties;
-}) {
-  return (
-    <td style={{ textAlign: align, padding: "0.65rem 0.75rem", ...style }}>{children}</td>
-  );
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr.includes("T") ? dateStr : dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}

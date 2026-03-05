@@ -44,7 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   <h1
                     style={{
                       fontFamily: "var(--font-serif)",
-                      fontSize: "1.35rem",
+                      fontSize: "1.85rem",
                       fontWeight: 700,
                       letterSpacing: "-0.01em",
                       color: "var(--text-primary)",

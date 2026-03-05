@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { fetchNarrativeDetail, fetchHeadlines, NarrativeDetail, Headline } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
+import { formatDateLong } from "@/lib/format";
 
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
@@ -288,7 +289,7 @@ export default function NarrativeDetailPage() {
         fontStyle: "italic",
         fontFamily: "var(--font-serif)",
       }}>
-        Tracking since {formatDate(detail.first_seen)} &middot; Last seen {formatDate(detail.last_seen)}
+        Tracking since {formatDateLong(detail.first_seen)} &middot; Last seen {formatDateLong(detail.last_seen)}
       </div>
     </div>
   );
@@ -336,7 +337,3 @@ function MetricCard({ label, value, highlight }: { label: string; value: string;
   );
 }
 
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-}

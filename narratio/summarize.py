@@ -5,44 +5,14 @@ import json
 import logging
 from datetime import datetime, timedelta
 import httpx
-from narratio.db import get_connection
+from narratio.db import get_connection, parse_datetime
+from narratio.openrouter import call_chat_async
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-MAX_RETRIES = 5
-BACKOFF_BASE = 2  # seconds
-
-
-async def _call_openrouter_chat_async(
-    client: httpx.AsyncClient,
-    messages: list[dict],
-    api_key: str,
-    model: str = "anthropic/claude-sonnet-4",
-) -> dict:
-    for attempt in range(MAX_RETRIES):
-        resp = await client.post(
-            OPENROUTER_CHAT_URL,
-            json={"model": model, "messages": messages, "temperature": 0.3},
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=120,
-        )
-        if resp.status_code == 429:
-            wait = min(BACKOFF_BASE ** (attempt + 1), 32)
-            logger.warning("Summary API rate limited, retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
-            await asyncio.sleep(wait)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise RuntimeError(f"OpenRouter API rate limited after {MAX_RETRIES} retries")
-
 
 def _week_start(published_at: str) -> str:
-    dt = datetime.fromisoformat(published_at.replace("+0000", "+00:00"))
+    dt = parse_datetime(published_at)
     monday = dt - timedelta(days=dt.weekday())
     return monday.strftime("%Y-%m-%d")
 
@@ -171,7 +141,7 @@ Headlines from week of {ws}:
     ]
 
     async with semaphore:
-        result = await _call_openrouter_chat_async(client, messages, api_key, model=model)
+        result = await call_chat_async(client, messages, api_key, model=model, temperature=0.3, timeout=120)
 
     summary = result["choices"][0]["message"]["content"].strip()
     return (nid, ws, summary)

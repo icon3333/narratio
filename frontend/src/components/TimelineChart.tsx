@@ -23,6 +23,10 @@ const PALETTE = [
   "#9b6b9e", // mauve
 ];
 
+// Muted grey for the "Other" bucket — blends into background
+const OTHER_COLOR_LIGHT = "#d4d0cc";
+const OTHER_COLOR_DARK = "#44403c";
+
 const THUMB_W = 34;
 const THUMB_H = Math.round(THUMB_W * (66 / 51));
 // Plotly margin matches sharedLayout below
@@ -33,9 +37,10 @@ interface Props {
   data: TimelinePoint[];
   mode: "attention" | "zscore";
   covers?: Cover[];
+  colorMap?: Record<string, string>;
 }
 
-export default function TimelineChart({ data, mode, covers }: Props) {
+export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -72,7 +77,7 @@ export default function TimelineChart({ data, mode, covers }: Props) {
 
   // Theme-aware chart colors
   const textColor = isDark ? "#f5f0eb" : "#1a1a1a";
-  const secondaryColor = isDark ? "#a8a29e" : "#999";
+  const secondaryColor = isDark ? "#a8a29e" : "#666";
   const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)";
   const zerolineColor = isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.1)";
   const lineColor = isDark ? "#44403c" : "#e8e5e1";
@@ -81,9 +86,22 @@ export default function TimelineChart({ data, mode, covers }: Props) {
   const thresholdColor = isDark ? "rgba(239,68,68,0.3)" : "rgba(227,18,11,0.2)";
   const coverLineColor = isDark ? "rgba(200,200,200,0.3)" : "rgba(100,100,100,0.3)";
 
-  // Filter out "Other" bucket — only show real narratives
-  const filtered = useMemo(() => data.filter((d) => d.label !== "Other"), [data]);
-  const labels = useMemo(() => [...new Set(filtered.map((d) => d.label))], [filtered]);
+  // In attention mode, keep "Other" (renders at bottom of stack for 100% sum)
+  // In z-score mode, filter it out (z-score for an aggregated bucket is meaningless)
+  const filtered = useMemo(
+    () => data.filter((d) => mode === "attention" || d.label !== "Other"),
+    [data, mode],
+  );
+  // Put "Other" first so it renders at the bottom of the stacked area
+  const labels = useMemo(() => {
+    const all = [...new Set(filtered.map((d) => d.label))];
+    const otherIdx = all.indexOf("Other");
+    if (otherIdx > 0) {
+      all.splice(otherIdx, 1);
+      all.unshift("Other");
+    }
+    return all;
+  }, [filtered]);
 
   // Compute date range from the actual data
   const { minDate, maxDate, dateSpan } = useMemo(() => {
@@ -130,22 +148,19 @@ export default function TimelineChart({ data, mode, covers }: Props) {
       color: textColor,
       size: 11,
     },
-    legend: {
-      orientation: "h" as const,
-      y: -0.25,
-      font: { size: 10, color: secondaryColor },
-    },
-    hovermode: "x unified" as const,
+    showlegend: false,
+    hovermode: "closest" as const,
     hoverlabel: {
-      bgcolor: isDark ? "#292524" : "#ffffff",
+      bgcolor: isDark ? "#1c1917" : "#ffffff",
       bordercolor: isDark ? "#44403c" : "#e8e5e1",
       font: {
         color: isDark ? "#f5f0eb" : "#1a1a1a",
         family: "'DM Sans', sans-serif",
         size: 11,
       },
+      namelength: -1,
     },
-    margin: { l: MARGIN_L, r: MARGIN_R, t: 8, b: 70 },
+    margin: { l: MARGIN_L, r: MARGIN_R, t: 8, b: 36 },
     xaxis: {
       type: "date" as const,
       gridcolor: gridColor,
@@ -173,9 +188,11 @@ export default function TimelineChart({ data, mode, covers }: Props) {
       const uniqueWeeks = [...new Set(filtered.map((d) => d.week_start))];
       const useBars = uniqueWeeks.length <= 1;
 
+      const otherColor = isDark ? OTHER_COLOR_DARK : OTHER_COLOR_LIGHT;
       t = labels.map((label, i) => {
         const points = filtered.filter((d) => d.label === label);
-        const color = PALETTE[i % PALETTE.length];
+        const isOther = label === "Other";
+        const color = isOther ? otherColor : (colorMap?.[label] ?? PALETTE[i % PALETTE.length]);
         if (useBars) {
           return {
             x: [label],
@@ -193,19 +210,22 @@ export default function TimelineChart({ data, mode, covers }: Props) {
           type: "scatter" as const,
           mode: "lines" as const,
           stackgroup: "one",
-          groupnorm: "percent" as const,
           line: { width: 0, shape: "spline" as const, smoothing: 1.3 },
-          fillcolor: color + "cc",
-          hovertemplate: `<b>%{fullData.name}</b><br>%{y:.1f}%<extra></extra>`,
+          fillcolor: color + (isOther ? "88" : "cc"),
+          hoveron: "points+fills" as const,
+          hovertemplate: `%{fullData.name} %{y:.1f}%<extra></extra>`,
+          hoverlabel: { bgcolor: isDark ? "#1c1917" : "#ffffff", font: { color: isDark ? "#f5f0eb" : "#1a1a1a" } },
         };
       });
 
       l = {
         ...sharedLayout,
+        ...(!useBars ? { hovermode: "closest" as const } : {}),
         yaxis: {
           ...sharedLayout.yaxis,
           title: { text: "Share of Attention", font: { size: 11, color: secondaryColor } },
           ticksuffix: "%",
+          range: [0, 100],
         },
         ...(useBars ? { barmode: "group" as const } : {}),
         shapes: [...coverShapes],
@@ -217,25 +237,27 @@ export default function TimelineChart({ data, mode, covers }: Props) {
 
       t = labels.map((label, i) => {
         const points = filtered.filter((d) => d.label === label);
+        const color = colorMap?.[label] ?? PALETTE[i % PALETTE.length];
         if (useBarsZ) {
           return {
             x: [label],
             y: [points[0]?.z_score ?? 0],
             name: label,
             type: "bar" as const,
-            marker: { color: PALETTE[i % PALETTE.length] },
+            marker: { color },
             hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f}<extra></extra>`,
           };
         }
         return {
           x: points.map((p) => p.week_start),
           y: points.map((p) => p.z_score),
+          customdata: points.map((p) => p.share_of_attention),
           name: label,
           type: "scatter" as const,
           mode: "lines+markers" as const,
-          line: { color: PALETTE[i % PALETTE.length], width: 2 },
-          marker: { size: 4, color: PALETTE[i % PALETTE.length] },
-          hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f}<extra></extra>`,
+          line: { color, width: 2 },
+          marker: { size: 4, color },
+          hovertemplate: `<b>%{fullData.name}</b><br>z = %{y:.2f} · %{customdata:.1f}%<extra></extra>`,
         };
       });
 
@@ -262,7 +284,7 @@ export default function TimelineChart({ data, mode, covers }: Props) {
     }
 
     return { traces: t, layout: l };
-  }, [filtered, labels, mode, coverShapes, sharedLayout, secondaryColor, bandColor, bandStrongColor, thresholdColor, zerolineColor]);
+  }, [filtered, labels, mode, isDark, colorMap, coverShapes, sharedLayout, secondaryColor, bandColor, bandStrongColor, thresholdColor, zerolineColor]);
 
   return (
     <div ref={wrapperRef} style={{ position: "relative" }}>

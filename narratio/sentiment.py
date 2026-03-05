@@ -4,47 +4,12 @@ import asyncio
 import json
 import logging
 import re
+from itertools import batched
 import httpx
 from narratio.db import get_connection
+from narratio.openrouter import call_chat_async
 
 logger = logging.getLogger(__name__)
-
-OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-
-SENTIMENT_PROMPT = """Classify this financial headline's sentiment as bearish, neutral, or bullish.
-Return ONLY a JSON object: {"score": <float from -1.0 to 1.0>, "label": "<bearish|neutral|bullish>"}
-
-Headline: {headline}
-Summary: {summary}"""
-
-MAX_RETRIES = 5
-BACKOFF_BASE = 2  # seconds
-
-
-async def _call_openrouter_chat_async(
-    client: httpx.AsyncClient,
-    messages: list[dict],
-    api_key: str,
-    model: str = "google/gemini-2.0-flash-001",
-) -> dict:
-    for attempt in range(MAX_RETRIES):
-        resp = await client.post(
-            OPENROUTER_CHAT_URL,
-            json={"model": model, "messages": messages, "temperature": 0},
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=60,
-        )
-        if resp.status_code == 429:
-            wait = min(BACKOFF_BASE ** (attempt + 1), 32)
-            logger.warning("Sentiment API rate limited, retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
-            await asyncio.sleep(wait)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise RuntimeError(f"OpenRouter API rate limited after {MAX_RETRIES} retries")
 
 
 def _parse_sentiment_response(raw: str) -> tuple[float, str]:
@@ -110,7 +75,7 @@ Each object: {{"index": <int>, "score": <float -1.0 to 1.0>, "label": "<bearish|
     ]
 
     async with semaphore:
-        result = await _call_openrouter_chat_async(client, messages, api_key, model=model)
+        result = await call_chat_async(client, messages, api_key, model=model)
 
     content = result["choices"][0]["message"]["content"]
     sentiments = _parse_batch_response(content, len(batch))
@@ -147,7 +112,7 @@ async def _analyze_sentiment_async(
             return 0
 
         logger.info("Analyzing sentiment for %d articles in %d batches", len(rows), (len(rows) + batch_size - 1) // batch_size)
-        batches = [rows[i : i + batch_size] for i in range(0, len(rows), batch_size)]
+        batches = list(batched(rows, batch_size))
         semaphore = asyncio.Semaphore(max_concurrent)
 
         async with httpx.AsyncClient() as client:

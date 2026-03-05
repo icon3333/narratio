@@ -37,6 +37,7 @@ export interface NarrativeDetail {
   first_seen: string;
   last_seen: string;
   status: string;
+  significance_score: number | null;
   weeks: NarrativeWeek[];
 }
 
@@ -47,40 +48,6 @@ export interface Headline {
   published_at: string;
   sentiment_score: number | null;
   sentiment_label: string | null;
-}
-
-export async function fetchNarratives(): Promise<Narrative[]> {
-  const res = await fetch(`${API_BASE}/api/narratives`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchTimeline(params?: {
-  start?: string;
-  end?: string;
-  narratives?: number[];
-  top_n?: number;
-}): Promise<TimelinePoint[]> {
-  const searchParams = new URLSearchParams();
-  if (params?.start) searchParams.set("start", params.start);
-  if (params?.end) searchParams.set("end", params.end);
-  if (params?.narratives) searchParams.set("narratives", params.narratives.join(","));
-  if (params?.top_n) searchParams.set("top_n", params.top_n.toString());
-  const res = await fetch(`${API_BASE}/api/timeline?${searchParams}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchNarrativeDetail(id: number): Promise<NarrativeDetail> {
-  const res = await fetch(`${API_BASE}/api/narratives/${id}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchHeadlines(id: number, limit = 10): Promise<Headline[]> {
-  const res = await fetch(`${API_BASE}/api/narratives/${id}/headlines?limit=${limit}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
 }
 
 export interface Article {
@@ -108,28 +75,7 @@ export interface Stats {
   top_by_significance: { id: number; label: string; significance_score: number }[];
   biggest_movers: { id: number; label: string; z_score: number }[];
   longest_running: { id: number; label: string; first_seen: string; last_seen: string; duration_days: number }[];
-}
-
-export async function fetchArticles(params?: {
-  page?: number;
-  per_page?: number;
-  source?: string;
-  search?: string;
-}): Promise<ArticlesResponse> {
-  const searchParams = new URLSearchParams();
-  if (params?.page) searchParams.set("page", params.page.toString());
-  if (params?.per_page) searchParams.set("per_page", params.per_page.toString());
-  if (params?.source) searchParams.set("source", params.source);
-  if (params?.search) searchParams.set("search", params.search);
-  const res = await fetch(`${API_BASE}/api/articles?${searchParams}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchStats(): Promise<Stats> {
-  const res = await fetch(`${API_BASE}/api/stats`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
+  sources_breakdown: { source: string; count: number; first_article: string; last_article: string }[];
 }
 
 export interface ArisingNarrative {
@@ -146,12 +92,6 @@ export interface ArisingNarrative {
   weekly_articles: number[];
 }
 
-export async function fetchArising(): Promise<ArisingNarrative[]> {
-  const res = await fetch(`${API_BASE}/api/arising`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
-}
-
 export interface PipelineStatus {
   running: boolean;
   last_result: string | null;
@@ -159,26 +99,6 @@ export interface PipelineStatus {
   total_steps: number;
   step_label: string;
 }
-
-export async function triggerPipeline(): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/api/pipeline/run`, { method: "POST" });
-  if (!res.ok) throw new Error(`Pipeline trigger failed: ${res.status}`);
-  return res.json();
-}
-
-export async function triggerAnalysis(): Promise<{ status: string }> {
-  const res = await fetch(`${API_BASE}/api/pipeline/analyze`, { method: "POST" });
-  if (!res.ok) throw new Error(`Analysis trigger failed: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchPipelineStatus(): Promise<PipelineStatus> {
-  const res = await fetch(`${API_BASE}/api/pipeline/status`);
-  if (!res.ok) throw new Error(`Pipeline status failed: ${res.status}`);
-  return res.json();
-}
-
-// ---- Economist Covers ----
 
 export interface Cover {
   id: number;
@@ -197,6 +117,82 @@ export interface CoversResponse {
   years: number[];
 }
 
+// ---- Shared helpers ----
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+function buildParams(obj: Record<string, string | number | undefined>): string {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(obj))
+    if (v !== undefined && v !== null && v !== "") sp.set(k, String(v));
+  return sp.toString();
+}
+
+// ---- API functions ----
+
+export const fetchNarratives = () =>
+  fetchJson<Narrative[]>(`${API_BASE}/api/narratives`);
+
+export function fetchTimeline(params?: {
+  start?: string;
+  end?: string;
+  narratives?: number[];
+  top_n?: number;
+}): Promise<TimelinePoint[]> {
+  const qs = buildParams({
+    start: params?.start,
+    end: params?.end,
+    narratives: params?.narratives?.join(","),
+    top_n: params?.top_n,
+  });
+  return fetchJson(`${API_BASE}/api/timeline?${qs}`);
+}
+
+export const fetchNarrativeDetail = (id: number) =>
+  fetchJson<NarrativeDetail>(`${API_BASE}/api/narratives/${id}`);
+
+export const fetchHeadlines = (id: number, limit = 10) =>
+  fetchJson<Headline[]>(`${API_BASE}/api/narratives/${id}/headlines?limit=${limit}`);
+
+export const fetchSources = () =>
+  fetchJson<string[]>(`${API_BASE}/api/sources`);
+
+export function fetchArticles(params?: {
+  page?: number;
+  per_page?: number;
+  source?: string;
+  search?: string;
+}): Promise<ArticlesResponse> {
+  const qs = buildParams({
+    page: params?.page,
+    per_page: params?.per_page,
+    source: params?.source,
+    search: params?.search,
+  });
+  return fetchJson(`${API_BASE}/api/articles?${qs}`);
+}
+
+export const fetchStats = () =>
+  fetchJson<Stats>(`${API_BASE}/api/stats`);
+
+export const fetchArising = () =>
+  fetchJson<ArisingNarrative[]>(`${API_BASE}/api/arising`);
+
+export const triggerPipeline = () =>
+  fetchJson<{ status: string }>(`${API_BASE}/api/pipeline/run`, { method: "POST" });
+
+export const triggerAnalysis = () =>
+  fetchJson<{ status: string }>(`${API_BASE}/api/pipeline/analyze`, { method: "POST" });
+
+export const fetchPipelineStatus = () =>
+  fetchJson<PipelineStatus>(`${API_BASE}/api/pipeline/status`);
+
+// ---- Economist Covers ----
+
 export function coverImageUrl(url: string, thumb = false): string {
   const optimized = thumb
     ? url.replace("width=1424", "width=400").replace("quality=80", "quality=70")
@@ -204,20 +200,12 @@ export function coverImageUrl(url: string, thumb = false): string {
   return `${API_BASE}/api/covers/image-proxy?url=${encodeURIComponent(optimized)}`;
 }
 
-export async function fetchCovers(year?: number, page?: number, perPage?: number): Promise<CoversResponse> {
-  const params = new URLSearchParams();
-  if (year) params.set("year", year.toString());
-  if (page) params.set("page", page.toString());
-  if (perPage) params.set("per_page", perPage.toString());
-  const res = await fetch(`${API_BASE}/api/covers?${params}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
+export function fetchCovers(year?: number, page?: number, perPage?: number): Promise<CoversResponse> {
+  const qs = buildParams({ year, page, per_page: perPage });
+  return fetchJson(`${API_BASE}/api/covers?${qs}`);
 }
 
-export async function refreshCovers(year?: number): Promise<{ status: string; year: number }> {
-  const params = new URLSearchParams();
-  if (year) params.set("year", year.toString());
-  const res = await fetch(`${API_BASE}/api/covers/refresh?${params}`, { method: "POST" });
-  if (!res.ok) throw new Error(`Cover refresh failed: ${res.status}`);
-  return res.json();
+export function refreshCovers(year?: number): Promise<{ status: string; year: number }> {
+  const qs = buildParams({ year });
+  return fetchJson(`${API_BASE}/api/covers/refresh?${qs}`, { method: "POST" });
 }

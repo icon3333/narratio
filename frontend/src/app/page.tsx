@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import TimelineChart from "@/components/TimelineChart";
 import NarrativeTable from "@/components/NarrativeTable";
 import ArticlesTab from "@/components/ArticlesTab";
@@ -19,6 +19,13 @@ import {
   PipelineStatus,
   Cover,
 } from "@/lib/api";
+
+// Must match PALETTE in TimelineChart.tsx
+const NARRATIVE_PALETTE = [
+  "#E3120B", "#1a6b8a", "#c4841d", "#5b7553", "#7b5ea7",
+  "#d45d79", "#3d85c6", "#8c6d46", "#6b8e9b", "#b85c38",
+  "#4a8c7f", "#9b6b9e",
+];
 
 function SkeletonChart() {
   return (
@@ -40,7 +47,7 @@ function SkeletonTable() {
   );
 }
 
-type TabKey = "arising" | "history" | "articles" | "covers" | "stats";
+type TabKey = "arising" | "history" | "articles" | "covers" | "stats" | "settings";
 type TimeRange = "all" | "1y" | "quarter" | "month";
 
 function getTimeRangeParams(range: TimeRange): { start?: string } {
@@ -102,25 +109,131 @@ export default function Dashboard() {
       .map(([label, entry]) => ({ label, ids: entry.ids }));
   }, [timeline, narratives]);
 
-  const [visibleCount, setVisibleCount] = useState(0);
+  const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(new Set());
 
   // Reset when available narratives change
   useEffect(() => {
-    setVisibleCount(rankedLabels.length);
+    setHiddenLabels(new Set());
   }, [rankedLabels.length]);
 
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleChipClick = useCallback((label: string) => {
+    if (clickTimerRef.current) {
+      // Double-click detected — clear the pending single-click
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+      // Isolate: show only this label, hide all others
+      setHiddenLabels((prev) => {
+        const allLabels = rankedLabels.map((r) => r.label);
+        const othersHidden = allLabels.filter((l) => l !== label).every((l) => prev.has(l));
+        if (othersHidden) {
+          // Already isolated — reset to show all
+          return new Set();
+        }
+        return new Set(allLabels.filter((l) => l !== label));
+      });
+      return;
+    }
+    // Delay single-click to allow double-click detection
+    clickTimerRef.current = setTimeout(() => {
+      clickTimerRef.current = null;
+      setHiddenLabels((prev) => {
+        const next = new Set(prev);
+        if (next.has(label)) next.delete(label);
+        else next.add(label);
+        return next;
+      });
+    }, 250);
+  }, [rankedLabels]);
+
   const visibleLabels = useMemo(
-    () => new Set(rankedLabels.slice(0, visibleCount).map((r) => r.label)),
-    [rankedLabels, visibleCount],
+    () => new Set(rankedLabels.filter((r) => !hiddenLabels.has(r.label)).map((r) => r.label)),
+    [rankedLabels, hiddenLabels],
   );
   const visibleIds = useMemo(
-    () => new Set(rankedLabels.slice(0, visibleCount).flatMap((r) => [...r.ids])),
-    [rankedLabels, visibleCount],
+    () => new Set(rankedLabels.filter((r) => !hiddenLabels.has(r.label)).flatMap((r) => [...r.ids])),
+    [rankedLabels, hiddenLabels],
   );
-  const filteredTimeline = useMemo(
-    () => timeline.filter((d) => visibleLabels.has(d.label)),
-    [timeline, visibleLabels],
-  );
+  const filteredTimeline = useMemo(() => {
+    // In attention mode, fold hidden narratives' share into "Other" to maintain 100% sum
+    // In z-score mode, just filter normally (no stacking invariant)
+    if (mode !== "attention" || hiddenLabels.size === 0) {
+      return timeline.filter((d) => visibleLabels.has(d.label) || d.label === "Other");
+    }
+
+    // Group by week, accumulate hidden share into "Other"
+    const weekMap = new Map<string, { other: TimelinePoint | null; hidden_sum: number }>();
+    const visible: TimelinePoint[] = [];
+
+    for (const d of timeline) {
+      if (d.label !== "Other" && !visibleLabels.has(d.label) && !hiddenLabels.has(d.label)) continue;
+
+      if (d.label === "Other" || hiddenLabels.has(d.label)) {
+        let entry = weekMap.get(d.week_start);
+        if (!entry) {
+          entry = { other: null, hidden_sum: 0 };
+          weekMap.set(d.week_start, entry);
+        }
+        if (d.label === "Other") {
+          entry.other = d;
+        } else {
+          entry.hidden_sum += d.share_of_attention;
+        }
+      } else {
+        visible.push(d);
+      }
+    }
+
+    // Build merged "Other" rows
+    const otherRows: TimelinePoint[] = [];
+    for (const [week, entry] of weekMap) {
+      if (entry.other) {
+        otherRows.push({
+          ...entry.other,
+          share_of_attention: entry.other.share_of_attention + entry.hidden_sum,
+        });
+      } else if (entry.hidden_sum > 0) {
+        // No backend "Other" row for this week — create one
+        otherRows.push({
+          narrative_id: -1,
+          label: "Other",
+          week_start: week,
+          share_of_attention: entry.hidden_sum,
+          z_score: null,
+          article_count: 0,
+          sentiment_mean: null,
+        });
+      }
+    }
+
+    return [...visible, ...otherRows];
+  }, [timeline, visibleLabels, hiddenLabels, mode]);
+
+  // Stable color registry: once a label gets a color, it keeps it for the session
+  const stableColorRef = useRef<Record<string, string>>({});
+
+  const colorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    const usedColors = new Set(Object.values(stableColorRef.current));
+
+    rankedLabels.forEach((r) => {
+      if (stableColorRef.current[r.label]) {
+        map[r.label] = stableColorRef.current[r.label];
+      } else {
+        let colorIdx = 0;
+        while (usedColors.has(NARRATIVE_PALETTE[colorIdx % NARRATIVE_PALETTE.length]) && colorIdx < NARRATIVE_PALETTE.length) {
+          colorIdx++;
+        }
+        const color = NARRATIVE_PALETTE[colorIdx % NARRATIVE_PALETTE.length];
+        map[r.label] = color;
+        stableColorRef.current[r.label] = color;
+        usedColors.add(color);
+      }
+    });
+
+    return map;
+  }, [rankedLabels]);
 
   // Filter covers to current time range
   const visibleCovers = (() => {
@@ -132,9 +245,24 @@ export default function Dashboard() {
       return new Date(c.date) >= startDate;
     });
   })();
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = getTimeRangeParams(timeRange);
+      const [n, t] = await Promise.all([fetchNarratives(), fetchTimeline(params)]);
+      setNarratives(n);
+      setTimeline(t);
+    } catch (e) {
+      console.error("Failed to load data:", e);
+      setError("Failed to load dashboard data. Is the API running?");
+    }
+    setLoading(false);
+  }, [timeRange]);
+
   useEffect(() => {
     loadData();
-  }, [timeRange]);
+  }, [loadData]);
 
   // Fetch all covers when toggle is turned on
   useEffect(() => {
@@ -150,21 +278,6 @@ export default function Dashboard() {
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     };
   }, []);
-
-  async function loadData() {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = getTimeRangeParams(timeRange);
-      const [n, t] = await Promise.all([fetchNarratives(), fetchTimeline(params)]);
-      setNarratives(n);
-      setTimeline(t);
-    } catch (e) {
-      console.error("Failed to load data:", e);
-      setError("Failed to load dashboard data. Is the API running?");
-    }
-    setLoading(false);
-  }
 
   function pollStatus() {
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
@@ -221,27 +334,60 @@ export default function Dashboard() {
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
+        <button
+          className={activeTab === "settings" ? "tab-active" : ""}
+          onClick={() => setActiveTab("settings")}
+          style={{ marginLeft: "auto" }}
+        >
+          Settings
+        </button>
       </div>
 
       {activeTab === "arising" && <ArisingTab />}
       {activeTab === "articles" && <ArticlesTab />}
       {activeTab === "covers" && <CoversTab />}
       {activeTab === "stats" && <StatsTab />}
+      {activeTab === "settings" && (
+        <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+          {/* Pipeline section */}
+          <div style={{
+            background: "var(--bg-card)",
+            borderRadius: 3,
+            boxShadow: "var(--card-shadow)",
+            padding: "1.5rem",
+          }}>
+            <h2 style={{
+              fontFamily: "var(--font-serif)",
+              fontSize: "1.05rem",
+              fontWeight: 400,
+              marginBottom: "0.25rem",
+              color: "var(--text-primary)",
+            }}>
+              Pipeline
+            </h2>
+            <p style={{
+              fontFamily: "var(--font-sans)",
+              fontSize: "0.78rem",
+              color: "var(--text-secondary)",
+              marginBottom: "1rem",
+              lineHeight: 1.5,
+            }}>
+              Re-analyze runs the 9-step analysis on existing articles. Update Data also ingests new articles first.
+            </p>
+            {pipelineRunning ? (
+              <PipelineProgress progressPct={progressPct} stepLabel={pipelineStatus.step_label} />
+            ) : (
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <PipelineButton onClick={handleRunAnalysis}>Re-analyze</PipelineButton>
+                <PipelineButton onClick={handleRunPipeline}>Update Data</PipelineButton>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {activeTab === "history" && error && (
-        <div
-          style={{
-            padding: "0.75rem 1rem",
-            background: "var(--bg-error)",
-            border: "1px solid var(--border-error)",
-            borderRadius: 3,
-            fontFamily: "var(--font-sans)",
-            fontSize: "0.8rem",
-            color: "var(--text-error)",
-          }}
-        >
-          {error}
-        </div>
+        <div className="error-box">{error}</div>
       )}
       {activeTab === "history" && (
         <>
@@ -283,34 +429,9 @@ export default function Dashboard() {
                 </ToggleSwitch>
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              {pipelineRunning ? (
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}>
-                    <polyline points="23 4 23 10 17 10" />
-                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                  </svg>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 140 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.75rem", fontWeight: 500, color: "var(--text-primary)", letterSpacing: "0.03em" }}>
-                        {progressPct}%
-                      </span>
-                      <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.7rem", color: "var(--text-secondary)" }}>
-                        {pipelineStatus.step_label}
-                      </span>
-                    </div>
-                    <div style={{ height: 3, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${progressPct}%`, background: "var(--red)", borderRadius: 2, transition: "width 0.4s ease" }} />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <PipelineButton onClick={handleRunAnalysis}>Re-analyze</PipelineButton>
-                  <PipelineButton onClick={handleRunPipeline}>Update Data</PipelineButton>
-                </>
-              )}
-            </div>
+            {pipelineRunning && (
+              <PipelineProgress progressPct={progressPct} stepLabel={pipelineStatus.step_label} />
+            )}
           </div>
 
           {/* Timeline Chart */}
@@ -338,20 +459,64 @@ export default function Dashboard() {
                   {mode === "attention" ? "Share of Attention" : "Z-Score Anomaly Detection"}
                 </h2>
                 {rankedLabels.length > 1 && (
-                  <div className="narrative-slider">
-                    <label>
-                      Showing {visibleCount} of {rankedLabels.length} narratives
-                    </label>
-                    <input
-                      type="range"
-                      min={1}
-                      max={rankedLabels.length}
-                      value={visibleCount}
-                      onChange={(e) => setVisibleCount(Number(e.target.value))}
-                    />
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center", marginBottom: "0.75rem" }}>
+                    {rankedLabels.map((r) => {
+                      const hidden = hiddenLabels.has(r.label);
+                      const color = colorMap[r.label] ?? NARRATIVE_PALETTE[0];
+                      return (
+                        <button
+                          key={r.label}
+                          onClick={() => handleChipClick(r.label)}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.3rem",
+                            padding: "0.2rem 0.5rem",
+                            border: "1px solid var(--border)",
+                            borderRadius: 12,
+                            background: hidden ? "transparent" : "var(--bg-card)",
+                            opacity: hidden ? 0.4 : 1,
+                            cursor: "pointer",
+                            fontFamily: "var(--font-sans)",
+                            fontSize: "0.68rem",
+                            color: "var(--text-secondary)",
+                            lineHeight: 1.3,
+                            transition: "opacity 0.15s ease",
+                          }}
+                        >
+                          <span style={{
+                            width: 7,
+                            height: 7,
+                            borderRadius: "50%",
+                            background: color,
+                            flexShrink: 0,
+                            opacity: hidden ? 0.3 : 1,
+                          }} />
+                          {r.label}
+                        </button>
+                      );
+                    })}
+                    {hiddenLabels.size > 0 && (
+                      <button
+                        onClick={() => setHiddenLabels(new Set())}
+                        style={{
+                          padding: "0.2rem 0.5rem",
+                          border: "none",
+                          borderRadius: 12,
+                          background: "none",
+                          cursor: "pointer",
+                          fontFamily: "var(--font-sans)",
+                          fontSize: "0.68rem",
+                          color: "var(--red)",
+                          fontWeight: 500,
+                        }}
+                      >
+                        Show all
+                      </button>
+                    )}
                   </div>
                 )}
-                <TimelineChart data={filteredTimeline} mode={mode} covers={visibleCovers} />
+                <TimelineChart data={filteredTimeline} mode={mode} covers={visibleCovers} colorMap={colorMap} />
               </div>
             )}
           </div>
@@ -432,6 +597,30 @@ function ToggleSwitch({ checked, onChange, children }: { checked: boolean; onCha
         className={`toggle-track${checked ? " toggle-track--on" : ""}`}
       />
     </label>
+  );
+}
+
+function PipelineProgress({ progressPct, stepLabel }: { progressPct: number; stepLabel: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--red)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}>
+        <polyline points="23 4 23 10 17 10" />
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+      </svg>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: 140 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.75rem", fontWeight: 500, color: "var(--text-primary)", letterSpacing: "0.03em" }}>
+            {progressPct}%
+          </span>
+          <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.7rem", color: "var(--text-secondary)" }}>
+            {stepLabel}
+          </span>
+        </div>
+        <div style={{ height: 3, background: "var(--border)", borderRadius: 2, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${progressPct}%`, background: "var(--red)", borderRadius: 2, transition: "width 0.4s ease" }} />
+        </div>
+      </div>
+    </div>
   );
 }
 

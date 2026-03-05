@@ -2,51 +2,14 @@
 
 import asyncio
 import logging
+from itertools import batched
 import numpy as np
 import httpx
 from pathlib import Path
 from narratio.db import get_connection
+from narratio.openrouter import call_embed_async
 
 logger = logging.getLogger(__name__)
-
-OPENROUTER_EMBED_URL = "https://openrouter.ai/api/v1/embeddings"
-
-MAX_RETRIES = 5
-BACKOFF_BASE = 2  # seconds
-
-
-def _build_embed_request(texts: list[str], model: str = "openai/text-embedding-3-small") -> dict:
-    return {
-        "model": model,
-        "input": texts,
-    }
-
-
-async def _call_openrouter_embed_async(
-    client: httpx.AsyncClient,
-    texts: list[str],
-    api_key: str,
-    model: str = "openai/text-embedding-3-small",
-) -> dict:
-    req = _build_embed_request(texts, model)
-    for attempt in range(MAX_RETRIES):
-        resp = await client.post(
-            OPENROUTER_EMBED_URL,
-            json=req,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=60,
-        )
-        if resp.status_code == 429:
-            wait = min(BACKOFF_BASE ** (attempt + 1), 32)
-            logger.warning("Embedding API rate limited, retrying in %ds (attempt %d/%d)", wait, attempt + 1, MAX_RETRIES)
-            await asyncio.sleep(wait)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise RuntimeError(f"Embedding API rate limited after {MAX_RETRIES} retries")
 
 
 async def _process_batch(
@@ -60,7 +23,7 @@ async def _process_batch(
     texts = [f"{r['headline']}. {r['summary']}" for r in batch]
 
     async with semaphore:
-        result = await _call_openrouter_embed_async(client, texts, api_key, model)
+        result = await call_embed_async(client, texts, api_key, model)
 
     sorted_data = sorted(result["data"], key=lambda x: x["index"])
 
@@ -101,7 +64,7 @@ async def _embed_articles_async(
             emb_path.parent.mkdir(parents=True, exist_ok=True)
             all_embeddings = []
 
-        batches = [rows[i : i + batch_size] for i in range(0, len(rows), batch_size)]
+        batches = list(batched(rows, batch_size))
 
         semaphore = asyncio.Semaphore(max_concurrent)
 

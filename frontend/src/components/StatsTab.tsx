@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchStats, Stats } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 
 export default function StatsTab() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -33,20 +34,7 @@ export default function StatsTab() {
   }
 
   if (error || !stats) {
-    return (
-      <div
-        style={{
-          padding: "0.75rem 1rem",
-          background: "var(--bg-error)",
-          border: "1px solid var(--border-error)",
-          borderRadius: 3,
-          fontSize: "0.8rem",
-          color: "var(--text-error)",
-        }}
-      >
-        {error || "No data available."}
-      </div>
-    );
+    return <div className="error-box">{error || "No data available."}</div>;
   }
 
   const noiseRatio = stats.total_articles > 0
@@ -60,6 +48,11 @@ export default function StatsTab() {
         <div className="stat-card">
           <div className="stat-label">Total Articles</div>
           <div className="stat-value">{stats.total_articles.toLocaleString()}</div>
+          {stats.sources_breakdown.length > 0 && (
+            <div className="stat-sub">
+              {stats.sources_breakdown.map((s) => `${s.source}: ${s.count.toLocaleString()}`).join(" / ")}
+            </div>
+          )}
         </div>
         <div className="stat-card">
           <div className="stat-label">Narratives</div>
@@ -227,7 +220,3 @@ function MiniTable({
   );
 }
 
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr.includes("T") ? dateStr : dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}

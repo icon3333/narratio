@@ -22,7 +22,7 @@ from narratio.data import (
     get_arising,
     compute_significance_scores,
 )
-from narratio.db import init_db, get_connection
+from narratio.db import init_db, get_connection, connection
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,17 @@ def get_headlines(narrative_id: int, limit: int = 10):
         return get_narrative_headlines(DB_PATH, narrative_id, limit=limit)
     except Exception as e:
         logger.error("Failed to get headlines for narrative %d: %s", narrative_id, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sources")
+def list_sources():
+    try:
+        with connection(DB_PATH) as conn:
+            rows = conn.execute("SELECT DISTINCT source FROM articles ORDER BY source").fetchall()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.error("Failed to list sources: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -265,35 +276,32 @@ def list_covers(
     per_page: int = 60,
 ):
     try:
-        conn = get_connection(DB_PATH)
-        # Check if table exists
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='economist_covers'"
-        ).fetchall()]
-        if "economist_covers" not in tables:
-            conn.close()
-            return {"covers": [], "total": 0, "page": page, "per_page": per_page, "years": []}
+        with connection(DB_PATH) as conn:
+            # Check if table exists
+            tables = [r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='economist_covers'"
+            ).fetchall()]
+            if "economist_covers" not in tables:
+                return {"covers": [], "total": 0, "page": page, "per_page": per_page, "years": []}
 
-        where = "WHERE year = ?" if year else ""
-        params: list = [year] if year else []
+            where = "WHERE year = ?" if year else ""
+            params: list = [year] if year else []
 
-        total = conn.execute(
-            f"SELECT COUNT(*) FROM economist_covers {where}", params
-        ).fetchone()[0]
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM economist_covers {where}", params
+            ).fetchone()[0]
 
-        offset = (page - 1) * per_page
-        rows = conn.execute(
-            f"""SELECT id, date, title, image_url, edition_url, year
-                FROM economist_covers {where}
-                ORDER BY date DESC LIMIT ? OFFSET ?""",
-            params + [per_page, offset],
-        ).fetchall()
+            offset = (page - 1) * per_page
+            rows = conn.execute(
+                f"""SELECT id, date, title, image_url, edition_url, year
+                    FROM economist_covers {where}
+                    ORDER BY date DESC LIMIT ? OFFSET ?""",
+                params + [per_page, offset],
+            ).fetchall()
 
-        years = [r[0] for r in conn.execute(
-            "SELECT DISTINCT year FROM economist_covers ORDER BY year DESC"
-        ).fetchall()]
-
-        conn.close()
+            years = [r[0] for r in conn.execute(
+                "SELECT DISTINCT year FROM economist_covers ORDER BY year DESC"
+            ).fetchall()]
 
         covers = [
             {"id": r[0], "date": r[1], "title": r[2], "image_url": r[3],

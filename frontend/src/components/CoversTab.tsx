@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { fetchCovers, refreshCovers, coverImageUrl, Cover, CoversResponse } from "@/lib/api";
+import { formatDateUK } from "@/lib/format";
 
 function SkeletonGrid() {
   return (
@@ -60,11 +61,6 @@ export default function CoversTab() {
 
   function handleCardClick(cover: Cover) {
     setSelectedCover(cover);
-  }
-
-  function formatDate(dateStr: string) {
-    const d = new Date(dateStr + "T00:00:00");
-    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   }
 
   return (
@@ -147,22 +143,8 @@ export default function CoversTab() {
         </button>
       </div>
 
-      {/* Error */}
       {error && (
-        <div
-          style={{
-            padding: "0.75rem 1rem",
-            background: "var(--bg-error)",
-            border: "1px solid var(--border-error)",
-            borderRadius: 3,
-            fontFamily: "var(--font-sans)",
-            fontSize: "0.8rem",
-            color: "var(--text-error)",
-            marginBottom: "1.5rem",
-          }}
-        >
-          {error}
-        </div>
+        <div className="error-box" style={{ marginBottom: "1.5rem" }}>{error}</div>
       )}
 
       {/* Grid */}
@@ -194,7 +176,7 @@ export default function CoversTab() {
                 loading="lazy"
               />
               <div className="cover-info">
-                <span className="cover-date">{formatDate(cover.date)}</span>
+                <span className="cover-date">{formatDateUK(cover.date)}</span>
                 {cover.edition_url && (
                   <a
                     href={cover.edition_url}
@@ -227,7 +209,7 @@ export default function CoversTab() {
               alt={selectedCover.title || `Economist cover ${selectedCover.date}`}
             />
             <div className="cover-modal-info">
-              <span>{formatDate(selectedCover.date)}</span>
+              <span>{formatDateUK(selectedCover.date)}</span>
               {selectedCover.title && <span>{selectedCover.title}</span>}
             </div>
           </div>

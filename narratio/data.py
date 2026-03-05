@@ -4,116 +4,105 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 import pandas as pd
-from narratio.db import get_connection
+from narratio.db import connection
 
 logger = logging.getLogger(__name__)
 
 
-def get_narratives_df(db_path: str) -> pd.DataFrame:
-    conn = get_connection(db_path)
-    df = pd.read_sql_query(
-        """SELECT n.id, n.label, n.first_seen, n.last_seen, n.status,
-                  n.significance_score,
-                  COUNT(aa.article_id) as article_count
-           FROM narratives n
-           LEFT JOIN article_analysis aa ON aa.narrative_id = n.id
-           WHERE n.status = 'active'
-           GROUP BY n.id
-           HAVING article_count > 0
-           ORDER BY CASE WHEN n.significance_score IS NULL THEN 1 ELSE 0 END,
-                  n.significance_score DESC, article_count DESC""",
-        conn,
-    )
-    conn.close()
-    return df
-
-
-def compute_significance_scores(db_path: str) -> int:
-    """Compute and store significance scores for all narratives.
+def _score_narrative(weeks: list, reference_date: datetime, four_weeks_ago: str) -> float:
+    """Compute significance score for a narrative from its weekly data.
 
     Score balances magnitude, recency, anomaly, and freshness:
     - 0.3 * cumulative share (total importance)
     - 0.4 * recent share (current relevance, last 4 weeks)
     - 0.2 * peak z-score (anomalous spikes)
     - 0.1 * recency (penalize dormant narratives)
-
-    Returns number of narratives scored.
     """
-    conn = get_connection(db_path)
+    shares = [w["share_of_attention"] or 0 for w in weeks]
+    z_scores = [max(-10, min(10, w["z_score"] or 0)) for w in weeks]
 
-    narratives = conn.execute("SELECT id FROM narratives").fetchall()
-    if not narratives:
-        conn.close()
-        return 0
+    cum_share = sum(shares)
 
-    # Get current date from the latest week_start in the data
-    latest = conn.execute("SELECT MAX(week_start) as latest FROM narrative_weeks").fetchone()
-    if not latest or not latest["latest"]:
-        conn.close()
-        return 0
-    current_date = datetime.fromisoformat(latest["latest"])
-    four_weeks_ago = (current_date - timedelta(weeks=4)).strftime("%Y-%m-%d")
+    recent = [w for w in weeks if w["week_start"] >= four_weeks_ago]
+    recent_shares = [w["share_of_attention"] or 0 for w in recent]
+    recent_share = sum(recent_shares) / len(recent_shares) if recent_shares else 0
 
-    # Batch fetch all narrative weeks in one query (avoids N+1)
-    all_weeks = conn.execute(
-        "SELECT narrative_id, week_start, share_of_attention, z_score FROM narrative_weeks ORDER BY narrative_id, week_start"
-    ).fetchall()
-    weeks_by_narrative: dict[int, list] = {}
-    for w in all_weeks:
-        weeks_by_narrative.setdefault(w["narrative_id"], []).append(w)
+    peak_z = max(abs(z) for z in z_scores) if z_scores else 0
 
-    count = 0
-    updates = []
-    for row in narratives:
-        nid = row["id"]
-        weeks = weeks_by_narrative.get(nid, [])
+    last_seen = weeks[-1]["week_start"]
+    weeks_since_last = (reference_date - datetime.fromisoformat(last_seen)).days / 7
+    recency = max(0, 1 - weeks_since_last / 12)
 
-        if not weeks:
-            continue  # leave significance_score as NULL
+    norm_cum = min(cum_share / 100, 1.0)
+    norm_recent = min(recent_share / 100, 1.0)
+    norm_z = min(peak_z / 5, 1.0)
+    return 0.3 * norm_cum + 0.4 * norm_recent + 0.2 * norm_z + 0.1 * recency
 
-        shares = [w["share_of_attention"] or 0 for w in weeks]
-        # Clamp extreme z_scores (data corruption guard)
-        z_scores = [max(-10, min(10, w["z_score"] or 0)) for w in weeks]
 
-        cum_share = sum(shares)
+def get_narratives_df(db_path: str) -> pd.DataFrame:
+    with connection(db_path) as conn:
+        return pd.read_sql_query(
+            """SELECT n.id, n.label, n.first_seen, n.last_seen, n.status,
+                      n.significance_score,
+                      COUNT(aa.article_id) as article_count
+               FROM narratives n
+               LEFT JOIN article_analysis aa ON aa.narrative_id = n.id
+               WHERE n.status = 'active'
+               GROUP BY n.id
+               HAVING article_count > 0
+               ORDER BY CASE WHEN n.significance_score IS NULL THEN 1 ELSE 0 END,
+                      n.significance_score DESC, article_count DESC""",
+            conn,
+        )
 
-        recent = [w for w in weeks if w["week_start"] >= four_weeks_ago]
-        recent_shares = [w["share_of_attention"] or 0 for w in recent]
-        recent_share = sum(recent_shares) / len(recent_shares) if recent_shares else 0
 
-        peak_z = max(abs(z) for z in z_scores) if z_scores else 0
+def compute_significance_scores(db_path: str) -> int:
+    """Compute and store significance scores for all narratives."""
+    with connection(db_path) as conn:
+        narratives = conn.execute("SELECT id FROM narratives").fetchall()
+        if not narratives:
+            return 0
 
-        last_seen = weeks[-1]["week_start"]
-        weeks_since_last = (current_date - datetime.fromisoformat(last_seen)).days / 7
-        recency = max(0, 1 - weeks_since_last / 12)
+        latest = conn.execute("SELECT MAX(week_start) as latest FROM narrative_weeks").fetchone()
+        if not latest or not latest["latest"]:
+            return 0
+        current_date = datetime.fromisoformat(latest["latest"])
+        four_weeks_ago = (current_date - timedelta(weeks=4)).strftime("%Y-%m-%d")
 
-        norm_cum = min(cum_share / 100, 1.0)
-        norm_recent = min(recent_share / 100, 1.0)
-        norm_z = min(peak_z / 5, 1.0)
-        score = 0.3 * norm_cum + 0.4 * norm_recent + 0.2 * norm_z + 0.1 * recency
+        # Batch fetch all narrative weeks in one query (avoids N+1)
+        all_weeks = conn.execute(
+            "SELECT narrative_id, week_start, share_of_attention, z_score FROM narrative_weeks ORDER BY narrative_id, week_start"
+        ).fetchall()
+        weeks_by_narrative: dict[int, list] = {}
+        for w in all_weeks:
+            weeks_by_narrative.setdefault(w["narrative_id"], []).append(w)
 
-        updates.append((round(score, 3), nid))
-        count += 1
+        count = 0
+        updates = []
+        for row in narratives:
+            weeks = weeks_by_narrative.get(row["id"], [])
+            if not weeks:
+                continue
+            score = _score_narrative(weeks, current_date, four_weeks_ago)
+            updates.append((round(score, 3), row["id"]))
+            count += 1
 
-    conn.executemany("UPDATE narratives SET significance_score = ? WHERE id = ?", updates)
-
-    conn.commit()
-    conn.close()
-    return count
+        conn.executemany("UPDATE narratives SET significance_score = ? WHERE id = ?", updates)
+        conn.commit()
+        return count
 
 
 def get_top_narrative_ids(db_path: str, top_n: int = 12) -> list[int]:
     """Return the top_n narrative IDs by significance_score."""
-    conn = get_connection(db_path)
-    rows = conn.execute(
-        """SELECT id FROM narratives
-           WHERE significance_score IS NOT NULL AND status = 'active'
-           ORDER BY significance_score DESC
-           LIMIT ?""",
-        (top_n,),
-    ).fetchall()
-    conn.close()
-    return [r["id"] for r in rows]
+    with connection(db_path) as conn:
+        rows = conn.execute(
+            """SELECT id FROM narratives
+               WHERE significance_score IS NOT NULL AND status = 'active'
+               ORDER BY significance_score DESC
+               LIMIT ?""",
+            (top_n,),
+        ).fetchall()
+        return [r["id"] for r in rows]
 
 
 def get_top_narrative_ids_for_window(
@@ -122,41 +111,30 @@ def get_top_narrative_ids_for_window(
     start: str | None = None,
     end: str | None = None,
 ) -> list[int]:
-    """Return top_n narrative IDs ranked by significance within a time window.
-
-    When start/end are None, falls back to global significance_score.
-    When a window is specified, computes window-relative scores:
-    - 0.3 * cumulative share (within window)
-    - 0.4 * recent share (last 4 weeks relative to window end)
-    - 0.2 * peak z-score (within window)
-    - 0.1 * recency (relative to window end)
-    """
+    """Return top_n narrative IDs ranked by significance within a time window."""
     if not start and not end:
         return get_top_narrative_ids(db_path, top_n)
 
-    conn = get_connection(db_path)
+    with connection(db_path) as conn:
+        # Build date filter for narrative_weeks
+        date_filter = ""
+        date_params: list = []
+        if start:
+            date_filter += " AND nw.week_start >= ?"
+            date_params.append(start)
+        if end:
+            date_filter += " AND nw.week_start <= ?"
+            date_params.append(end)
 
-    # Build date filter for narrative_weeks
-    date_filter = ""
-    date_params: list = []
-    if start:
-        date_filter += " AND nw.week_start >= ?"
-        date_params.append(start)
-    if end:
-        date_filter += " AND nw.week_start <= ?"
-        date_params.append(end)
-
-    # Get all narrative weeks within the window (active narratives only)
-    rows = conn.execute(
-        f"""SELECT nw.narrative_id, nw.week_start,
-                   nw.share_of_attention, nw.z_score
-            FROM narrative_weeks nw
-            JOIN narratives n ON n.id = nw.narrative_id
-            WHERE n.status = 'active'{date_filter}
-            ORDER BY nw.narrative_id, nw.week_start""",
-        date_params,
-    ).fetchall()
-    conn.close()
+        rows = conn.execute(
+            f"""SELECT nw.narrative_id, nw.week_start,
+                       nw.share_of_attention, nw.z_score
+                FROM narrative_weeks nw
+                JOIN narratives n ON n.id = nw.narrative_id
+                WHERE n.status = 'active'{date_filter}
+                ORDER BY nw.narrative_id, nw.week_start""",
+            date_params,
+        ).fetchall()
 
     if not rows:
         return get_top_narrative_ids(db_path, top_n)
@@ -167,36 +145,15 @@ def get_top_narrative_ids_for_window(
     )
     four_weeks_before_end = (window_end - timedelta(weeks=4)).strftime("%Y-%m-%d")
 
-    # Group by narrative
     by_narrative: dict[int, list] = defaultdict(list)
     for r in rows:
         by_narrative[r["narrative_id"]].append(r)
 
     scores: list[tuple[int, float]] = []
     for nid, weeks in by_narrative.items():
-        shares = [w["share_of_attention"] or 0 for w in weeks]
-        # Clamp extreme z_scores (data corruption guard)
-        z_scores = [max(-10, min(10, w["z_score"] or 0)) for w in weeks]
-
-        cum_share = sum(shares)
-        if cum_share == 0:
-            continue  # skip narratives with zero activity in window
-
-        recent = [w for w in weeks if w["week_start"] >= four_weeks_before_end]
-        recent_shares = [w["share_of_attention"] or 0 for w in recent]
-        recent_share = sum(recent_shares) / len(recent_shares) if recent_shares else 0
-
-        peak_z = max(abs(z) for z in z_scores) if z_scores else 0
-
-        last_seen = weeks[-1]["week_start"]
-        weeks_since_last = (window_end - datetime.fromisoformat(last_seen)).days / 7
-        recency = max(0, 1 - weeks_since_last / 12)
-
-        norm_cum = min(cum_share / 100, 1.0)
-        norm_recent = min(recent_share / 100, 1.0)
-        norm_z = min(peak_z / 5, 1.0)
-        score = 0.3 * norm_cum + 0.4 * norm_recent + 0.2 * norm_z + 0.1 * recency
-
+        if sum(w["share_of_attention"] or 0 for w in weeks) == 0:
+            continue
+        score = _score_narrative(weeks, window_end, four_weeks_before_end)
         scores.append((nid, score))
 
     scores.sort(key=lambda x: x[1], reverse=True)
@@ -209,77 +166,67 @@ def get_timeline_with_other(
     start: str | None = None,
     end: str | None = None,
 ) -> pd.DataFrame:
-    """Return timeline data for top_n narratives + an 'Other' bucket.
-
-    The 'Other' row aggregates all non-top-N narratives per week.
-    """
-    conn = get_connection(db_path)
-
-    # Get top narrative IDs (window-aware when date filters are specified)
+    """Return timeline data for top_n narratives + an 'Other' bucket."""
     top_ids = get_top_narrative_ids_for_window(db_path, top_n, start, end)
     if not top_ids:
-        conn.close()
         return pd.DataFrame()
 
-    placeholders = ",".join("?" * len(top_ids))
+    with connection(db_path) as conn:
+        placeholders = ",".join("?" * len(top_ids))
 
-    # Build date filter
-    date_filter = ""
-    date_params: list = []
-    if start:
-        date_filter += " AND nw.week_start >= ?"
-        date_params.append(start)
-    if end:
-        date_filter += " AND nw.week_start <= ?"
-        date_params.append(end)
+        date_filter = ""
+        date_params: list = []
+        if start:
+            date_filter += " AND nw.week_start >= ?"
+            date_params.append(start)
+        if end:
+            date_filter += " AND nw.week_start <= ?"
+            date_params.append(end)
 
-    # Single query: top-N rows returned individually, rest aggregated as "Other"
-    df = pd.read_sql_query(
-        f"""SELECT nw.narrative_id, n.label, nw.week_start,
-                   nw.article_count, nw.share_of_attention,
-                   nw.z_score, nw.sentiment_mean
-            FROM narrative_weeks nw
-            JOIN narratives n ON n.id = nw.narrative_id
-            WHERE nw.narrative_id IN ({placeholders}){date_filter}
-        UNION ALL
-        SELECT
-                -1 as narrative_id,
-                'Other' as label,
-                nw.week_start,
-                SUM(nw.article_count) as article_count,
-                SUM(nw.share_of_attention) as share_of_attention,
-                NULL as z_score,
-                AVG(nw.sentiment_mean) as sentiment_mean
-            FROM narrative_weeks nw
-            WHERE nw.narrative_id NOT IN ({placeholders}){date_filter}
-            GROUP BY nw.week_start
-            HAVING SUM(nw.article_count) > 0
-        ORDER BY week_start, share_of_attention DESC""",
-        conn,
-        params=top_ids + date_params + top_ids + date_params,
-    )
+        df = pd.read_sql_query(
+            f"""SELECT nw.narrative_id, n.label, nw.week_start,
+                       nw.article_count, nw.share_of_attention,
+                       nw.z_score, nw.sentiment_mean
+                FROM narrative_weeks nw
+                JOIN narratives n ON n.id = nw.narrative_id
+                WHERE nw.narrative_id IN ({placeholders}){date_filter}
+            UNION ALL
+            SELECT
+                    -1 as narrative_id,
+                    'Other' as label,
+                    nw.week_start,
+                    SUM(nw.article_count) as article_count,
+                    SUM(nw.share_of_attention) as share_of_attention,
+                    NULL as z_score,
+                    AVG(nw.sentiment_mean) as sentiment_mean
+                FROM narrative_weeks nw
+                WHERE nw.narrative_id NOT IN ({placeholders}){date_filter}
+                GROUP BY nw.week_start
+                HAVING SUM(nw.article_count) > 0
+            ORDER BY week_start, share_of_attention DESC""",
+            conn,
+            params=top_ids + date_params + top_ids + date_params,
+        )
 
-    conn.close()
-
-    result = df
-    if not result.empty:
-        result["week_start"] = pd.to_datetime(result["week_start"])
-    return result
+    if not df.empty:
+        df["week_start"] = pd.to_datetime(df["week_start"])
+    return df
 
 
 def get_timeline_df(db_path: str) -> pd.DataFrame:
     """Legacy: returns all timeline data without top-N filtering."""
-    conn = get_connection(db_path)
-    df = pd.read_sql_query(
-        """SELECT nw.narrative_id, n.label, nw.week_start,
-                  nw.article_count, nw.share_of_attention,
-                  nw.z_score, nw.sentiment_mean
-           FROM narrative_weeks nw
-           JOIN narratives n ON n.id = nw.narrative_id
-           ORDER BY nw.week_start, nw.share_of_attention DESC""",
-        conn,
-    )
-    conn.close()
+    with connection(db_path) as conn:
+        df = pd.read_sql_query(
+            """SELECT nw.narrative_id, n.label, nw.week_start,
+                      nw.article_count, nw.share_of_attention,
+                      nw.z_score, nw.sentiment_mean
+               FROM narrative_weeks nw
+               JOIN narratives n ON n.id = nw.narrative_id
+               ORDER BY nw.week_start, nw.share_of_attention DESC""",
+            conn,
+        )
+    if df.empty:
+        return df
     df["week_start"] = pd.to_datetime(df["week_start"])
     return df
 
@@ -291,86 +238,94 @@ def get_articles_paginated(
     source: str | None = None,
     search: str | None = None,
 ) -> dict:
-    conn = get_connection(db_path)
-    where_clauses = []
-    params: list = []
-    if source:
-        where_clauses.append("a.source = ?")
-        params.append(source)
-    if search:
-        where_clauses.append("a.headline LIKE ?")
-        params.append(f"%{search}%")
-    where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    with connection(db_path) as conn:
+        where_clauses = []
+        params: list = []
+        if source:
+            where_clauses.append("a.source = ?")
+            params.append(source)
+        if search:
+            where_clauses.append("a.headline LIKE ?")
+            params.append(f"%{search}%")
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-    total = conn.execute(
-        f"SELECT COUNT(*) as cnt FROM articles a{where_sql}", params
-    ).fetchone()["cnt"]
+        total = conn.execute(
+            f"SELECT COUNT(*) as cnt FROM articles a{where_sql}", params
+        ).fetchone()["cnt"]
 
-    offset = (page - 1) * per_page
-    rows = conn.execute(
-        f"""SELECT a.headline, a.source, a.url, a.published_at
-            FROM articles a{where_sql}
-            ORDER BY a.published_at DESC
-            LIMIT ? OFFSET ?""",
-        params + [per_page, offset],
-    ).fetchall()
-    conn.close()
-    return {
-        "articles": [dict(r) for r in rows],
-        "total": total,
-        "page": page,
-        "per_page": per_page,
-    }
+        offset = (page - 1) * per_page
+        rows = conn.execute(
+            f"""SELECT a.headline, a.source, a.url, a.published_at
+                FROM articles a{where_sql}
+                ORDER BY a.published_at DESC
+                LIMIT ? OFFSET ?""",
+            params + [per_page, offset],
+        ).fetchall()
+        return {
+            "articles": [dict(r) for r in rows],
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+        }
 
 
 def get_stats(db_path: str) -> dict:
-    conn = get_connection(db_path)
+    with connection(db_path) as conn:
+        counts = conn.execute(
+            """SELECT
+                   (SELECT COUNT(*) FROM articles) as total_articles,
+                   (SELECT COUNT(*) FROM narratives) as total_narratives,
+                   (SELECT COUNT(*) FROM narratives WHERE status='active') as active_narratives,
+                   (SELECT COUNT(*) FROM narratives WHERE status='dormant') as dormant_narratives,
+                   (SELECT MIN(published_at) FROM articles) as first_article_date,
+                   (SELECT MAX(published_at) FROM articles) as last_article_date,
+                   (SELECT COUNT(*) FROM articles a LEFT JOIN article_analysis aa ON aa.article_id = a.id WHERE aa.narrative_id IS NULL) as noise_count"""
+        ).fetchone()
 
-    # Consolidated counts in a single query using CTEs
-    counts = conn.execute(
-        """SELECT
-               (SELECT COUNT(*) FROM articles) as total_articles,
-               (SELECT COUNT(*) FROM narratives) as total_narratives,
-               (SELECT COUNT(*) FROM narratives WHERE status='active') as active_narratives,
-               (SELECT COUNT(*) FROM narratives WHERE status='dormant') as dormant_narratives,
-               (SELECT MIN(published_at) FROM articles) as first_article_date,
-               (SELECT MAX(published_at) FROM articles) as last_article_date,
-               (SELECT COUNT(*) FROM articles a LEFT JOIN article_analysis aa ON aa.article_id = a.id WHERE aa.narrative_id IS NULL) as noise_count"""
-    ).fetchone()
+        top_by_significance = [
+            dict(r)
+            for r in conn.execute(
+                """SELECT id, label, significance_score
+                   FROM narratives
+                   WHERE significance_score IS NOT NULL
+                   ORDER BY significance_score DESC LIMIT 5"""
+            ).fetchall()
+        ]
 
-    top_by_significance = [
-        dict(r)
-        for r in conn.execute(
-            """SELECT id, label, significance_score
-               FROM narratives
-               WHERE significance_score IS NOT NULL
-               ORDER BY significance_score DESC LIMIT 5"""
-        ).fetchall()
-    ]
+        biggest_movers = [
+            dict(r)
+            for r in conn.execute(
+                """SELECT nw.narrative_id as id, n.label, nw.z_score
+                   FROM narrative_weeks nw
+                   JOIN narratives n ON n.id = nw.narrative_id
+                   WHERE nw.week_start = (SELECT MAX(week_start) FROM narrative_weeks)
+                     AND nw.z_score IS NOT NULL
+                   ORDER BY ABS(nw.z_score) DESC LIMIT 5"""
+            ).fetchall()
+        ]
 
-    biggest_movers = [
-        dict(r)
-        for r in conn.execute(
-            """SELECT nw.narrative_id as id, n.label, nw.z_score
-               FROM narrative_weeks nw
-               JOIN narratives n ON n.id = nw.narrative_id
-               WHERE nw.week_start = (SELECT MAX(week_start) FROM narrative_weeks)
-                 AND nw.z_score IS NOT NULL
-               ORDER BY ABS(nw.z_score) DESC LIMIT 5"""
-        ).fetchall()
-    ]
+        longest_running = [
+            dict(r)
+            for r in conn.execute(
+                """SELECT id, label, first_seen, last_seen,
+                          CAST(julianday(last_seen) - julianday(first_seen) AS INTEGER) as duration_days
+                   FROM narratives
+                   ORDER BY duration_days DESC LIMIT 5"""
+            ).fetchall()
+        ]
 
-    longest_running = [
-        dict(r)
-        for r in conn.execute(
-            """SELECT id, label, first_seen, last_seen,
-                      CAST(julianday(last_seen) - julianday(first_seen) AS INTEGER) as duration_days
-               FROM narratives
-               ORDER BY duration_days DESC LIMIT 5"""
-        ).fetchall()
-    ]
+        sources_breakdown = [
+            dict(r)
+            for r in conn.execute(
+                """SELECT source, COUNT(*) as count,
+                          MIN(published_at) as first_article,
+                          MAX(published_at) as last_article
+                   FROM articles
+                   GROUP BY source
+                   ORDER BY count DESC"""
+            ).fetchall()
+        ]
 
-    conn.close()
     return {
         "total_articles": counts["total_articles"],
         "total_narratives": counts["total_narratives"],
@@ -382,65 +337,55 @@ def get_stats(db_path: str) -> dict:
         "top_by_significance": top_by_significance,
         "biggest_movers": biggest_movers,
         "longest_running": longest_running,
+        "sources_breakdown": sources_breakdown,
     }
 
 
-def get_arising(db_path: str, lookback_weeks: int = 12, min_articles: int = 50, top_n: int = 15) -> list[dict]:
+def get_arising(db_path: str, lookback_weeks: int = 12, min_articles: int = 30, top_n: int = 15) -> list[dict]:
     """Return narratives with rising momentum, ranked by arising score.
 
-    Uses a trailing window (default 12 weeks ≈ 3 months) to detect narratives
-    whose coverage is growing, regardless of when they first appeared.
-
-    Hard filters:
-    - ≥ min_articles in the trailing window (default 50)
-    - Positive slope (only rising narratives)
-
-    arising_score = 0.40 * growth_velocity   (slope normalized: 5 articles/week = 1.0)
-                  + 0.30 * current_strength   (latest share_of_attention, normalized)
-                  + 0.30 * consistency         (fraction of window weeks with data)
+    Uses a trailing window (default 12 weeks) to detect narratives
+    whose relative importance is growing, regardless of overall volume changes.
     """
-    conn = get_connection(db_path)
+    with connection(db_path) as conn:
+        latest_row = conn.execute("SELECT MAX(week_start) as latest FROM narrative_weeks").fetchone()
+        if not latest_row or not latest_row["latest"]:
+            return []
+        latest_date = datetime.fromisoformat(latest_row["latest"])
+        window_start = (latest_date - timedelta(weeks=lookback_weeks)).strftime("%Y-%m-%d")
 
-    # Find the latest week in the data
-    latest_row = conn.execute("SELECT MAX(week_start) as latest FROM narrative_weeks").fetchone()
-    if not latest_row or not latest_row["latest"]:
-        conn.close()
-        return []
-    latest_date = datetime.fromisoformat(latest_row["latest"])
-    window_start = (latest_date - timedelta(weeks=lookback_weeks)).strftime("%Y-%m-%d")
+        week_rows = conn.execute(
+            """SELECT nw.narrative_id, nw.week_start, nw.article_count, nw.share_of_attention
+               FROM narrative_weeks nw
+               WHERE nw.week_start >= ?
+               ORDER BY nw.narrative_id, nw.week_start""",
+            (window_start,),
+        ).fetchall()
 
-    # Get all narratives with their weekly data in the trailing window
-    week_rows = conn.execute(
-        """SELECT nw.narrative_id, nw.week_start, nw.article_count, nw.share_of_attention
-           FROM narrative_weeks nw
-           WHERE nw.week_start >= ?
-           ORDER BY nw.narrative_id, nw.week_start""",
-        (window_start,),
-    ).fetchall()
+        narr_rows = conn.execute(
+            "SELECT id, label, first_seen, status FROM narratives",
+        ).fetchall()
+        narr_meta = {r["id"]: dict(r) for r in narr_rows}
 
-    # Get narrative metadata
-    narr_rows = conn.execute(
-        "SELECT id, label, first_seen, status FROM narratives",
-    ).fetchall()
-    narr_meta = {r["id"]: dict(r) for r in narr_rows}
+        top_ids = {r["id"] for r in conn.execute(
+            """SELECT id FROM narratives
+               WHERE significance_score IS NOT NULL AND status = 'active'
+               ORDER BY significance_score DESC LIMIT 10"""
+        ).fetchall()}
 
-    # Find max share across all narratives in the latest week (for normalization)
-    max_share_row = conn.execute(
-        "SELECT MAX(share_of_attention) as ms FROM narrative_weeks WHERE week_start = ?",
-        (latest_row["latest"],),
-    ).fetchone()
-    max_share = max_share_row["ms"] if max_share_row and max_share_row["ms"] else 1.0
+        max_share_row = conn.execute(
+            "SELECT MAX(share_of_attention) as ms FROM narrative_weeks WHERE week_start = ?",
+            (latest_row["latest"],),
+        ).fetchone()
+        max_share = max_share_row["ms"] if max_share_row and max_share_row["ms"] else 1.0
 
-    conn.close()
-
-    # Group weeks by narrative
     by_narrative: dict[int, list] = defaultdict(list)
     for r in week_rows:
         by_narrative[r["narrative_id"]].append(r)
 
     results = []
     for nid, weeks in by_narrative.items():
-        if nid not in narr_meta:
+        if nid not in narr_meta or nid in top_ids:
             continue
 
         weeks_sorted = sorted(weeks, key=lambda w: w["week_start"])
@@ -453,41 +398,43 @@ def get_arising(db_path: str, lookback_weeks: int = 12, min_articles: int = 50, 
 
         latest_share = shares[-1]
         latest_articles = article_counts[-1]
+        n_weeks = len(shares)
 
-        # Growth velocity: linear slope of article_count over weeks, normalized
-        n_weeks = len(article_counts)
-        if n_weeks >= 2:
-            x_mean = (n_weeks - 1) / 2
-            y_mean = sum(article_counts) / n_weeks
-            numerator = sum((i - x_mean) * (y - y_mean) for i, y in enumerate(article_counts))
-            denominator = sum((i - x_mean) ** 2 for i in range(n_weeks))
+        # Momentum: slope of share_of_attention over recent weeks (last 6)
+        momentum_weeks = 6
+        recent_shares = shares[-momentum_weeks:] if len(shares) >= momentum_weeks else shares
+        n_momentum = len(recent_shares)
+        if n_momentum >= 2:
+            x_mean = (n_momentum - 1) / 2
+            y_mean = sum(recent_shares) / n_momentum
+            numerator = sum((i - x_mean) * (y - y_mean) for i, y in enumerate(recent_shares))
+            denominator = sum((i - x_mean) ** 2 for i in range(n_momentum))
             slope = numerator / denominator if denominator > 0 else 0
         else:
             slope = 0
 
-        # Hard filter: only rising narratives
-        if slope <= 0:
+        if slope < -0.3:
             continue
 
-        # Normalize: slope of 5 articles/week = 1.0
-        growth_velocity = min(slope / 5, 1.0)
-
-        # Current strength: latest share normalized by max share
+        growth_velocity = max(min(slope / 0.5, 1.0), 0.0)
         current_strength = min(latest_share / max_share, 1.0) if max_share > 0 else 0
-
-        # Consistency: fraction of window weeks that have data
         consistency = min(n_weeks / lookback_weeks, 1.0)
 
+        mid = max(1, len(shares) // 2)
+        recent_max = max(shares[-mid:]) if shares[-mid:] else 0
+        older_max = max(shares[:mid]) if shares[:mid] else 0
+        recent_peak = min(recent_max / older_max, 2.0) / 2.0 if older_max > 0 else (0.5 if recent_max > 0 else 0)
+
         arising_score = (
-            0.40 * growth_velocity
-            + 0.30 * current_strength
-            + 0.30 * consistency
+            0.35 * growth_velocity
+            + 0.25 * current_strength
+            + 0.25 * recent_peak
+            + 0.15 * consistency
         )
 
-        # Growth trend label from slope
-        if slope > 1:
+        if slope > 0.1:
             growth_trend = "accelerating"
-        elif slope > 0:
+        elif slope > -0.1:
             growth_trend = "steady"
         else:
             growth_trend = "fading"
@@ -514,36 +461,36 @@ def get_arising(db_path: str, lookback_weeks: int = 12, min_articles: int = 50, 
     return results[:top_n]
 
 
-def get_narrative_detail(db_path: str, narrative_id: int) -> dict:
-    conn = get_connection(db_path)
-    narrative = conn.execute("SELECT * FROM narratives WHERE id = ?", (narrative_id,)).fetchone()
-    weeks = conn.execute(
-        "SELECT * FROM narrative_weeks WHERE narrative_id = ? ORDER BY week_start",
-        (narrative_id,),
-    ).fetchall()
-    conn.close()
-    return {
-        "id": narrative["id"],
-        "label": narrative["label"],
-        "first_seen": narrative["first_seen"],
-        "last_seen": narrative["last_seen"],
-        "status": narrative["status"],
-        "significance_score": narrative["significance_score"],
-        "weeks": [dict(w) for w in weeks],
-    }
+def get_narrative_detail(db_path: str, narrative_id: int) -> dict | None:
+    with connection(db_path) as conn:
+        narrative = conn.execute("SELECT * FROM narratives WHERE id = ?", (narrative_id,)).fetchone()
+        if narrative is None:
+            return None
+        weeks = conn.execute(
+            "SELECT * FROM narrative_weeks WHERE narrative_id = ? ORDER BY week_start",
+            (narrative_id,),
+        ).fetchall()
+        return {
+            "id": narrative["id"],
+            "label": narrative["label"],
+            "first_seen": narrative["first_seen"],
+            "last_seen": narrative["last_seen"],
+            "status": narrative["status"],
+            "significance_score": narrative["significance_score"],
+            "weeks": [dict(w) for w in weeks],
+        }
 
 
 def get_narrative_headlines(db_path: str, narrative_id: int, limit: int = 10) -> list[dict]:
-    conn = get_connection(db_path)
-    rows = conn.execute(
-        """SELECT a.headline, a.source, a.url, a.published_at,
-                  aa.sentiment_score, aa.sentiment_label
-           FROM articles a
-           JOIN article_analysis aa ON aa.article_id = a.id
-           WHERE aa.narrative_id = ?
-           ORDER BY a.published_at DESC
-           LIMIT ?""",
-        (narrative_id, limit),
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    with connection(db_path) as conn:
+        rows = conn.execute(
+            """SELECT a.headline, a.source, a.url, a.published_at,
+                      aa.sentiment_score, aa.sentiment_label
+               FROM articles a
+               JOIN article_analysis aa ON aa.article_id = a.id
+               WHERE aa.narrative_id = ?
+               ORDER BY a.published_at DESC
+               LIMIT ?""",
+            (narrative_id, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
