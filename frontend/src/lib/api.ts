@@ -117,6 +117,25 @@ export interface CoversResponse {
   years: number[];
 }
 
+export interface MapCountryNarrative {
+  narrative_id: number;
+  label: string;
+  count: number;
+}
+
+export interface MapCountry {
+  country_code: string;
+  country_name: string;
+  article_count: number;
+  share: number;
+  top_narratives: MapCountryNarrative[];
+}
+
+export interface DateRange {
+  min_date: string | null;
+  max_date: string | null;
+}
+
 // ---- Shared helpers ----
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -190,6 +209,16 @@ export const triggerAnalysis = () =>
 
 export const fetchPipelineStatus = () =>
   fetchJson<PipelineStatus>(`${API_BASE}/api/pipeline/status`);
+
+// ---- Map ----
+
+export function fetchMapData(params?: { start?: string; end?: string }): Promise<MapCountry[]> {
+  const qs = buildParams({ start: params?.start, end: params?.end });
+  return fetchJson(`${API_BASE}/api/map?${qs}`);
+}
+
+export const fetchDateRange = () =>
+  fetchJson<DateRange>(`${API_BASE}/api/date-range`);
 
 // ---- Economist Covers ----
 

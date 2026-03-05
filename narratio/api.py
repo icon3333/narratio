@@ -20,6 +20,8 @@ from narratio.data import (
     get_articles_paginated,
     get_stats,
     get_arising,
+    get_map_data,
+    get_article_date_range,
     compute_significance_scores,
 )
 from narratio.db import init_db, get_connection, connection
@@ -141,6 +143,24 @@ def arising():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/map")
+def map_data(start: str | None = None, end: str | None = None):
+    try:
+        return get_map_data(DB_PATH, start=start, end=end)
+    except Exception as e:
+        logger.error("Failed to get map data: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/date-range")
+def date_range():
+    try:
+        return get_article_date_range(DB_PATH)
+    except Exception as e:
+        logger.error("Failed to get date range: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/timeline")
 def get_timeline(
     mode: str = "attention",
@@ -224,7 +244,7 @@ def _finish_pipeline() -> None:
 
 
 def _run_pipeline_task():
-    _start_pipeline(total_steps=12)
+    _start_pipeline(total_steps=13)
     try:
         from narratio.config import get_config
         from narratio.pipeline import run_pipeline
@@ -244,7 +264,7 @@ def _run_pipeline_task():
 
 
 def _run_analysis_task():
-    _start_pipeline(total_steps=9)
+    _start_pipeline(total_steps=10)
     try:
         from narratio.config import get_config
         from narratio.pipeline import run_analysis

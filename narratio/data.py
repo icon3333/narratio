@@ -481,6 +481,96 @@ def get_narrative_detail(db_path: str, narrative_id: int) -> dict | None:
         }
 
 
+def get_map_data(db_path: str, start: str | None = None, end: str | None = None) -> list[dict]:
+    """Return per-country aggregation with top 3 narratives for map visualization."""
+    with connection(db_path) as conn:
+        # Check table exists
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='article_countries'"
+        ).fetchall()]
+        if "article_countries" not in tables:
+            return []
+
+        date_filter = ""
+        params: list = []
+        if start:
+            date_filter += " AND a.published_at >= ?"
+            params.append(start)
+        if end:
+            date_filter += " AND a.published_at <= ?"
+            params.append(end)
+
+        # Total articles in range for share calculation
+        total_row = conn.execute(
+            f"SELECT COUNT(DISTINCT ac.article_id) FROM article_countries ac JOIN articles a ON a.id = ac.article_id WHERE 1=1{date_filter}",
+            params,
+        ).fetchone()
+        total = total_row[0] if total_row else 0
+        if total == 0:
+            return []
+
+        # Per-country counts
+        country_rows = conn.execute(
+            f"""SELECT ac.country_code, COUNT(DISTINCT ac.article_id) as article_count
+                FROM article_countries ac
+                JOIN articles a ON a.id = ac.article_id
+                WHERE 1=1{date_filter}
+                GROUP BY ac.country_code
+                ORDER BY article_count DESC""",
+            params,
+        ).fetchall()
+
+        # Top 3 narratives per country
+        narr_rows = conn.execute(
+            f"""SELECT country_code, narrative_id, label, narr_count FROM (
+                    SELECT ac.country_code, aa.narrative_id, n.label,
+                           COUNT(*) as narr_count,
+                           ROW_NUMBER() OVER (PARTITION BY ac.country_code ORDER BY COUNT(*) DESC) as rn
+                    FROM article_countries ac
+                    JOIN articles a ON a.id = ac.article_id
+                    JOIN article_analysis aa ON aa.article_id = ac.article_id
+                    JOIN narratives n ON n.id = aa.narrative_id
+                    WHERE aa.narrative_id IS NOT NULL{date_filter}
+                    GROUP BY ac.country_code, aa.narrative_id
+                ) WHERE rn <= 3""",
+            params,
+        ).fetchall()
+
+        narr_by_country: dict[str, list[dict]] = {}
+        for r in narr_rows:
+            code = r["country_code"]
+            narr_by_country.setdefault(code, []).append({
+                "narrative_id": r["narrative_id"],
+                "label": r["label"],
+                "count": r["narr_count"],
+            })
+
+        from narratio.countries import COUNTRY_NAMES
+        result = []
+        for r in country_rows:
+            code = r["country_code"]
+            result.append({
+                "country_code": code,
+                "country_name": COUNTRY_NAMES.get(code, code),
+                "article_count": r["article_count"],
+                "share": round(r["article_count"] / total * 100, 1),
+                "top_narratives": narr_by_country.get(code, []),
+            })
+        return result
+
+
+def get_article_date_range(db_path: str) -> dict:
+    """Return min/max published_at dates for the time filter UI."""
+    with connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT MIN(published_at) as min_date, MAX(published_at) as max_date FROM articles"
+        ).fetchone()
+        return {
+            "min_date": row["min_date"] if row else None,
+            "max_date": row["max_date"] if row else None,
+        }
+
+
 def get_narrative_headlines(db_path: str, narrative_id: int, limit: int = 10) -> list[dict]:
     with connection(db_path) as conn:
         rows = conn.execute(

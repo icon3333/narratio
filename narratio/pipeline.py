@@ -39,8 +39,13 @@ def run_analysis(
     db_path = cfg.db_path
     embeddings_path = cfg.embeddings_path
 
-    cb(1, "Generating embeddings...")
-    console.print("\n[bold]1/9 Generating embeddings...[/bold]")
+    cb(1, "Extracting country mentions...")
+    console.print("\n[bold]1/10 Extracting country mentions...[/bold]")
+    n_countries = _extract_article_countries(db_path)
+    console.print(f"  Processed {n_countries} articles")
+
+    cb(2, "Generating embeddings...")
+    console.print("\n[bold]2/10 Generating embeddings...[/bold]")
     _ensure_analysis_rows(db_path)
     count = embed_articles(db_path, embeddings_path, cfg.openrouter_api_key, model=cfg.embed_model)
     console.print(f"  Embedded {count} articles")
@@ -48,13 +53,13 @@ def run_analysis(
     # Load embeddings once for all clustering steps
     emb = np.load(embeddings_path) if os.path.exists(embeddings_path) else None
 
-    cb(2, "Filtering relevance...")
-    console.print("\n[bold]2/9 Filtering relevance...[/bold]")
+    cb(3, "Filtering relevance...")
+    console.print("\n[bold]3/10 Filtering relevance...[/bold]")
     n_irrelevant = filter_relevance(db_path, embeddings_path, relevance_threshold=cfg.relevance_threshold, embeddings=emb)
     console.print(f"  Marked {n_irrelevant} articles as irrelevant")
 
-    cb(3, "Clustering articles...")
-    console.print("\n[bold]3/9 Clustering articles...[/bold]")
+    cb(4, "Clustering articles...")
+    console.print("\n[bold]4/10 Clustering articles...[/bold]")
     n_clusters = cluster_articles(
         db_path, embeddings_path,
         min_cluster_size=cfg.min_cluster_size,
@@ -66,18 +71,18 @@ def run_analysis(
     )
     console.print(f"  Found {n_clusters} raw clusters")
 
-    cb(4, "Merging clusters...")
-    console.print("\n[bold]4/9 Merging similar clusters...[/bold]")
+    cb(5, "Merging clusters...")
+    console.print("\n[bold]5/10 Merging similar clusters...[/bold]")
     n_merged = merge_clusters(db_path, embeddings_path, merge_threshold=cfg.merge_threshold, embeddings=emb)
     console.print(f"  Merged to {n_merged} clusters")
 
-    cb(5, "Analyzing sentiment...")
-    console.print("\n[bold]5/9 Analyzing sentiment...[/bold]")
+    cb(6, "Analyzing sentiment...")
+    console.print("\n[bold]6/10 Analyzing sentiment...[/bold]")
     count = analyze_sentiment(db_path, cfg.openrouter_api_key, model=cfg.sentiment_model)
     console.print(f"  Scored {count} articles")
 
-    cb(6, "Labeling narratives...")
-    console.print("\n[bold]6/9 Labeling narratives...[/bold]")
+    cb(7, "Labeling narratives...")
+    console.print("\n[bold]7/10 Labeling narratives...[/bold]")
     n_narratives = label_clusters(
         db_path, embeddings_path, cfg.openrouter_api_key,
         match_threshold=cfg.match_threshold,
@@ -86,18 +91,18 @@ def run_analysis(
     )
     console.print(f"  Labeled {n_narratives} new narratives")
 
-    cb(7, "Computing weekly analytics...")
-    console.print("\n[bold]7/9 Computing weekly analytics...[/bold]")
+    cb(8, "Computing weekly analytics...")
+    console.print("\n[bold]8/10 Computing weekly analytics...[/bold]")
     n_weeks = compute_weekly_analytics(db_path, z_score_window=cfg.z_score_window)
     console.print(f"  Computed analytics for {n_weeks} narrative-weeks")
 
-    cb(8, "Computing significance scores...")
-    console.print("\n[bold]8/9 Computing significance scores...[/bold]")
+    cb(9, "Computing significance scores...")
+    console.print("\n[bold]9/10 Computing significance scores...[/bold]")
     n_scored = compute_significance_scores(db_path)
     console.print(f"  Scored {n_scored} narratives")
 
-    cb(9, "Generating summaries...")
-    console.print("\n[bold]9/9 Generating LLM summaries (top narratives)...[/bold]")
+    cb(10, "Generating summaries...")
+    console.print("\n[bold]10/10 Generating LLM summaries (top narratives)...[/bold]")
     n_summaries = generate_weekly_summaries(
         db_path, cfg.openrouter_api_key,
         top_n=cfg.summary_top_n,
@@ -129,13 +134,13 @@ def run_pipeline(
     console.print("=" * 40)
 
     cb(1, "Initializing database...")
-    console.print("\n[bold]1/12 Initializing database...[/bold]")
+    console.print("\n[bold]1/13 Initializing database...[/bold]")
     init_db(cfg.db_path)
     console.print("  Done")
 
     # --- Ingest from all available sources ---
     cb(2, "Ingesting articles...")
-    console.print(f"\n[bold]2/12 Ingesting articles ({year}-{month:02d})...[/bold]")
+    console.print(f"\n[bold]2/13 Ingesting articles ({year}-{month:02d})...[/bold]")
     total_ingested = 0
 
     if cfg.nyt_api_key:
@@ -158,7 +163,7 @@ def run_pipeline(
 
     # --- Scrape Economist covers (non-blocking) ---
     cb(3, "Scraping Economist covers...")
-    console.print("\n[bold]3/12 Scraping Economist covers...[/bold]")
+    console.print("\n[bold]3/13 Scraping Economist covers...[/bold]")
     try:
         from narratio.scrape_covers import scrape_covers
         n_covers = scrape_covers(cfg.db_path, year=year)
@@ -171,6 +176,36 @@ def run_pipeline(
         cb(step + 3, label)
 
     run_analysis(cfg, progress_callback=_offset_cb)
+
+
+def _extract_article_countries(db_path: str) -> int:
+    """Extract country mentions from articles not yet in article_countries."""
+    from narratio.countries import extract_countries
+    from narratio.db import get_connection
+
+    conn = get_connection(db_path)
+    rows = conn.execute(
+        """SELECT a.id, a.headline, a.summary FROM articles a
+           WHERE a.id NOT IN (SELECT DISTINCT article_id FROM article_countries)"""
+    ).fetchall()
+    if not rows:
+        conn.close()
+        return 0
+
+    inserts = []
+    for row in rows:
+        codes = extract_countries(row["headline"], row["summary"] or "")
+        for code in codes:
+            inserts.append((row["id"], code))
+
+    if inserts:
+        conn.executemany(
+            "INSERT OR IGNORE INTO article_countries (article_id, country_code) VALUES (?, ?)",
+            inserts,
+        )
+        conn.commit()
+    conn.close()
+    return len(rows)
 
 
 def _ensure_analysis_rows(db_path: str) -> None:

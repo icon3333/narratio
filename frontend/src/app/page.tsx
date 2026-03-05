@@ -7,6 +7,7 @@ import ArticlesTab from "@/components/ArticlesTab";
 import StatsTab from "@/components/StatsTab";
 import ArisingTab from "@/components/ArisingTab";
 import CoversTab from "@/components/CoversTab";
+import MapTab from "@/components/MapTab";
 import {
   fetchNarratives,
   fetchTimeline,
@@ -47,7 +48,7 @@ function SkeletonTable() {
   );
 }
 
-type TabKey = "arising" | "history" | "articles" | "covers" | "stats" | "settings";
+type TabKey = "arising" | "history" | "articles" | "map" | "covers" | "stats" | "settings";
 type TimeRange = "all" | "1y" | "quarter" | "month";
 
 function getTimeRangeParams(range: TimeRange): { start?: string } {
@@ -303,7 +304,7 @@ export default function Dashboard() {
     try {
       const res = await triggerPipeline();
       if (res.status === "already_running") return;
-      setPipelineStatus({ running: true, last_result: null, step: 0, total_steps: 11, step_label: "Starting..." });
+      setPipelineStatus({ running: true, last_result: null, step: 0, total_steps: 13, step_label: "Starting..." });
       pollStatus();
     } catch (e) {
       console.error("Pipeline failed:", e);
@@ -314,7 +315,7 @@ export default function Dashboard() {
     try {
       const res = await triggerAnalysis();
       if (res.status === "already_running") return;
-      setPipelineStatus({ running: true, last_result: null, step: 0, total_steps: 9, step_label: "Starting..." });
+      setPipelineStatus({ running: true, last_result: null, step: 0, total_steps: 10, step_label: "Starting..." });
       pollStatus();
     } catch (e) {
       console.error("Analysis failed:", e);
@@ -325,7 +326,7 @@ export default function Dashboard() {
     <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
       {/* Tab Bar */}
       <div className="tab-bar fade-up">
-        {(["history", "arising", "articles", "covers", "stats"] as TabKey[]).map((tab) => (
+        {(["history", "arising", "articles", "map", "covers", "stats"] as TabKey[]).map((tab) => (
           <button
             key={tab}
             className={activeTab === tab ? "tab-active" : ""}
@@ -345,6 +346,7 @@ export default function Dashboard() {
 
       {activeTab === "arising" && <ArisingTab />}
       {activeTab === "articles" && <ArticlesTab />}
+      {activeTab === "map" && <MapTab />}
       {activeTab === "covers" && <CoversTab />}
       {activeTab === "stats" && <StatsTab />}
       {activeTab === "settings" && (

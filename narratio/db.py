@@ -90,6 +90,15 @@ CREATE INDEX IF NOT EXISTS idx_nw_week ON narrative_weeks(week_start DESC);
 
 -- narratives indexes
 CREATE INDEX IF NOT EXISTS idx_narratives_status ON narratives(status);
+
+-- article_countries junction table (country mentions per article)
+CREATE TABLE IF NOT EXISTS article_countries (
+    article_id INTEGER NOT NULL REFERENCES articles(id),
+    country_code TEXT NOT NULL,
+    PRIMARY KEY (article_id, country_code)
+);
+CREATE INDEX IF NOT EXISTS idx_ac_country ON article_countries(country_code);
+CREATE INDEX IF NOT EXISTS idx_ac_article ON article_countries(article_id);
 """
 
 
@@ -125,6 +134,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.commit()
     if "merged_cluster_id" not in aa_cols:
         conn.execute("ALTER TABLE article_analysis ADD COLUMN merged_cluster_id INTEGER")
+        conn.commit()
+
+    # Create article_countries table if missing (for existing databases)
+    tables = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='article_countries'"
+    ).fetchall()]
+    if "article_countries" not in tables:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS article_countries (
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                country_code TEXT NOT NULL,
+                PRIMARY KEY (article_id, country_code)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ac_country ON article_countries(country_code);
+            CREATE INDEX IF NOT EXISTS idx_ac_article ON article_countries(article_id);
+        """)
         conn.commit()
 
 
