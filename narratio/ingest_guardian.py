@@ -15,29 +15,46 @@ RELEVANT_SECTIONS = {
 }
 
 
-def _fetch_page(api_key: str, year: int, month: int, page: int = 1) -> dict:
+def _fetch_page(api_key: str, year: int, month: int, page: int = 1, max_retries: int = 3) -> dict:
     from_date = f"{year}-{month:02d}-01"
     if month == 12:
         to_date = f"{year + 1}-01-01"
     else:
         to_date = f"{year}-{month + 1:02d}-01"
 
-    resp = httpx.get(
-        GUARDIAN_URL,
-        params={
-            "api-key": api_key,
-            "from-date": from_date,
-            "to-date": to_date,
-            "section": "|".join(RELEVANT_SECTIONS),
-            "show-fields": "headline,trailText,wordcount,shortUrl",
-            "page-size": 200,
-            "page": page,
-            "order-by": "newest",
-        },
-        timeout=60,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    for attempt in range(max_retries):
+        try:
+            resp = httpx.get(
+                GUARDIAN_URL,
+                params={
+                    "api-key": api_key,
+                    "from-date": from_date,
+                    "to-date": to_date,
+                    "section": "|".join(RELEVANT_SECTIONS),
+                    "show-fields": "headline,trailText,wordcount,shortUrl",
+                    "page-size": 200,
+                    "page": page,
+                    "order-by": "newest",
+                },
+                timeout=60,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code < 500:
+                raise  # don't retry client errors
+            if attempt == max_retries - 1:
+                raise
+            wait = 2 ** attempt * 5
+            logger.warning("Guardian fetch failed (attempt %d/%d): %s — retrying in %ds", attempt + 1, max_retries, e, wait)
+            time.sleep(wait)
+        except httpx.TransportError as e:
+            if attempt == max_retries - 1:
+                raise
+            wait = 2 ** attempt * 5
+            logger.warning("Guardian fetch failed (attempt %d/%d): %s — retrying in %ds", attempt + 1, max_retries, e, wait)
+            time.sleep(wait)
+    return {}  # unreachable, but satisfies type checker
 
 
 def parse_guardian_article(raw: dict) -> dict | None:
@@ -79,27 +96,29 @@ def ingest_month(
     skipped = 0
     conn = get_connection(db_path)
 
-    while page <= total_pages:
-        data = _fetch_page(api_key, year, month, page)
-        response = data.get("response", {})
-        total_pages = min(response.get("pages", 1), 50)  # cap at 50 pages
-        results = response.get("results", [])
+    try:
+        while page <= total_pages:
+            data = _fetch_page(api_key, year, month, page)
+            response = data.get("response", {})
+            total_pages = min(response.get("pages", 1), 50)  # cap at 50 pages
+            results = response.get("results", [])
 
-        for raw in results:
-            parsed = parse_guardian_article(raw)
-            if parsed is None:
-                continue
-            if insert_article(conn, parsed):
-                inserted += 1
-            else:
-                skipped += 1
+            for raw in results:
+                parsed = parse_guardian_article(raw)
+                if parsed is None:
+                    continue
+                if insert_article(conn, parsed):
+                    inserted += 1
+                else:
+                    skipped += 1
 
-        page += 1
-        if page <= total_pages and delay > 0:
-            time.sleep(delay)
+            page += 1
+            if page <= total_pages and delay > 0:
+                time.sleep(delay)
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
     logger.info("Guardian %d-%02d: inserted=%d, skipped_dupes=%d, pages=%d", year, month, inserted, skipped, page - 1)
     return inserted
 

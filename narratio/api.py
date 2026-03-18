@@ -336,7 +336,9 @@ def list_covers(
 
 @app.get("/api/covers/image-proxy")
 async def cover_image_proxy(url: str = Query(...)):
-    if "economist.com" not in url:
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.hostname not in ("www.economist.com", "economist.com"):
         raise HTTPException(status_code=400, detail="Invalid image URL")
     try:
         async with httpx.AsyncClient(timeout=15) as client:

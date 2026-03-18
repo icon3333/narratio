@@ -256,7 +256,7 @@ export default function MapTab() {
 
   // Fetch date range on mount
   useEffect(() => {
-    fetchDateRange().then(setDateRange).catch(() => {});
+    fetchDateRange().then(setDateRange).catch((err) => console.error("Failed to fetch date range:", err));
   }, []);
 
   // Fetch map data when filters change

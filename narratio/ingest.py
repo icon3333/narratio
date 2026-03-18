@@ -89,21 +89,23 @@ def ingest_month(
     inserted = 0
     skipped = 0
 
-    for raw in docs:
-        if not _should_include(raw):
-            continue
-        if not raw.get("_id"):
-            logger.warning("Skipping NYT article with missing _id")
-            continue
+    try:
+        for raw in docs:
+            if not _should_include(raw):
+                continue
+            if not raw.get("_id"):
+                logger.warning("Skipping NYT article with missing _id")
+                continue
 
-        parsed = parse_nyt_article(raw)
-        if insert_article(conn, parsed):
-            inserted += 1
-        else:
-            skipped += 1
+            parsed = parse_nyt_article(raw)
+            if insert_article(conn, parsed):
+                inserted += 1
+            else:
+                skipped += 1
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
     logger.info("NYT %d-%02d: inserted=%d, skipped_dupes=%d", year, month, inserted, skipped)
     return inserted
 

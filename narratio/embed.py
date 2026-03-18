@@ -90,12 +90,13 @@ async def _embed_articles_async(
                 updates.append((emb_index, article_id))
                 total += 1
 
+        # Save numpy FIRST so DB never points to indices that don't exist on disk
+        np.save(str(emb_path), np.array(all_embeddings, dtype=np.float32))
         conn.executemany(
             "UPDATE article_analysis SET embedding_index = ? WHERE article_id = ?",
             updates,
         )
         conn.commit()
-        np.save(str(emb_path), np.array(all_embeddings, dtype=np.float32))
         if failures:
             logger.warning("Embedding complete: %d succeeded, %d batches failed", total, failures)
         else:

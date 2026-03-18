@@ -246,6 +246,7 @@ def _compute_z_scores(conn, window: int = 8):
     """Compute z-scores for share_of_attention across full history."""
     narratives = conn.execute("SELECT DISTINCT narrative_id FROM narrative_weeks").fetchall()
 
+    updates = []
     for row in narratives:
         nid = row["narrative_id"]
         weeks = conn.execute(
@@ -257,8 +258,6 @@ def _compute_z_scores(conn, window: int = 8):
         week_starts = [w["week_start"] for w in weeks]
 
         for i, (ws, share) in enumerate(zip(week_starts, shares)):
-            # Lookback window: use preceding weeks to compute baseline, then
-            # measure how anomalous the current week is relative to that baseline
             start = max(0, i - window)
             window_shares = shares[start:i + 1]
 
@@ -269,10 +268,12 @@ def _compute_z_scores(conn, window: int = 8):
                 std = (sum((s - mean) ** 2 for s in window_shares) / len(window_shares)) ** 0.5
                 z = (share - mean) / std if std > 0 else 0.0
 
-            conn.execute(
-                "UPDATE narrative_weeks SET z_score = ? WHERE narrative_id = ? AND week_start = ?",
-                (round(z, 3), nid, ws),
-            )
+            updates.append((round(z, 3), nid, ws))
+
+    conn.executemany(
+        "UPDATE narrative_weeks SET z_score = ? WHERE narrative_id = ? AND week_start = ?",
+        updates,
+    )
 
 
 def generate_weekly_summaries(

@@ -106,6 +106,7 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
   // Compute date range from the actual data
   const { minDate, maxDate, dateSpan } = useMemo(() => {
     const allDates = filtered.map((d) => new Date(d.week_start).getTime());
+    if (allDates.length === 0) return { minDate: 0, maxDate: 0, dateSpan: 1 };
     const min = Math.min(...allDates);
     const max = Math.max(...allDates);
     return { minDate: min, maxDate: max, dateSpan: max - min || 1 };

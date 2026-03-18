@@ -38,7 +38,7 @@ export default function ArticlesTab() {
 
   // Fetch available sources from dedicated endpoint on mount
   useEffect(() => {
-    fetchSources().then(setSources).catch(() => {});
+    fetchSources().then(setSources).catch((err) => console.error("Failed to fetch sources:", err));
   }, []);
 
   function handleSearch(e: React.FormEvent) {
