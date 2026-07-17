@@ -13,7 +13,7 @@ Narratio is a financial narrative tracker. It ingests headlines from the New Yor
 
 ## Quick Start
 
-You'll need Python 3.12+, Node.js 18+, and three API keys:
+You'll need Python 3.12+, Node.js 20.9+, and three API keys:
 - [NYT Archive API](https://developer.nytimes.com/)
 - [Guardian Open Platform](https://open-platform.theguardian.com/)
 - [OpenRouter](https://openrouter.ai/) (for embeddings + LLM calls)
