@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { fetchArticles, fetchSources, ArticlesResponse } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { Th, Td } from "@/components/Table";
+import { shouldStartSearchLoading } from "./articlesSearch.mjs";
 
 export default function ArticlesTab() {
   const [data, setData] = useState<ArticlesResponse | null>(null);
@@ -41,6 +42,7 @@ export default function ArticlesTab() {
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
+    if (!shouldStartSearchLoading(page, search, searchInput)) return;
     setLoading(true);
     setPage(1);
     setSearch(searchInput);

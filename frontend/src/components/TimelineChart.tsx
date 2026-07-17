@@ -183,7 +183,7 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
 
   const { traces, layout } = useMemo(() => {
     // Plotly's installed types omit the supported "points+fills" hover mode.
-    let t: unknown[];
+    let t: Plotly.Data[];
     let l: Partial<Plotly.Layout>;
 
     if (mode === "attention") {
@@ -214,7 +214,7 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
           stackgroup: "one",
           line: { width: 0, shape: "spline" as const, smoothing: 1.3 },
           fillcolor: color + (isOther ? "88" : "cc"),
-          hoveron: "points+fills" as const,
+          hoveron: "points+fills" as unknown as Plotly.PlotData["hoveron"],
           hovertemplate: `%{fullData.name} %{y:.1f}%<extra></extra>`,
           hoverlabel: { bgcolor: isDark ? "#1c1917" : "#ffffff", font: { color: isDark ? "#f5f0eb" : "#1a1a1a" } },
         };
@@ -385,7 +385,7 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
               }}
             />
           )}
-          <Plot data={traces as Plotly.Data[]} layout={layout} {...plotProps} />
+          <Plot data={traces} layout={layout} {...plotProps} />
         </>
       )}
     </div>
