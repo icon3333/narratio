@@ -11,7 +11,6 @@ export default function StatsTab() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
     fetchStats()
       .then(setStats)
       .catch(() => setError("Failed to load stats."))
@@ -219,4 +218,3 @@ function MiniTable({
     </table>
   );
 }
-

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import "./globals.css";
 import { ThemeProvider } from "@/lib/theme";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -39,7 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 justifyContent: "space-between",
               }}
             >
-              <a href="/" style={{ textDecoration: "none" }}>
+              <Link href="/" style={{ textDecoration: "none" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
                   <h1
                     style={{
@@ -66,7 +67,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     Narrative Radar
                   </div>
                 </div>
-              </a>
+              </Link>
               <ThemeToggle />
             </div>
           </header>

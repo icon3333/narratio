@@ -70,6 +70,45 @@ function getTimeRangeParams(range: TimeRange): { start?: string } {
   return { start: start.toISOString().slice(0, 10) };
 }
 
+function getRankedLabels(narratives: Narrative[], timeline: TimelinePoint[]) {
+  const labelTotals = new Map<string, { count: number; ids: Set<number> }>();
+  timeline
+    .filter((d) => d.label !== "Other")
+    .forEach((d) => {
+      const entry = labelTotals.get(d.label) || { count: 0, ids: new Set<number>() };
+      entry.count += d.article_count;
+      entry.ids.add(d.narrative_id);
+      labelTotals.set(d.label, entry);
+    });
+  const narrativeIds = new Set(narratives.map((n) => n.id));
+  return [...labelTotals.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .filter(([, entry]) => [...entry.ids].some((id) => narrativeIds.has(id)))
+    .slice(0, 10)
+    .map(([label, entry]) => ({ label, ids: entry.ids }));
+}
+
+function assignNarrativeColors(
+  labels: ReturnType<typeof getRankedLabels>,
+  existingColors: Record<string, string>,
+) {
+  const colors = { ...existingColors };
+  const usedColors = new Set(Object.values(colors));
+
+  labels.forEach(({ label }) => {
+    if (colors[label]) return;
+    let colorIdx = 0;
+    while (usedColors.has(NARRATIVE_PALETTE[colorIdx % NARRATIVE_PALETTE.length]) && colorIdx < NARRATIVE_PALETTE.length) {
+      colorIdx++;
+    }
+    const color = NARRATIVE_PALETTE[colorIdx % NARRATIVE_PALETTE.length];
+    colors[label] = color;
+    usedColors.add(color);
+  });
+
+  return colors;
+}
+
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabKey>("history");
   const [narratives, setNarratives] = useState<Narrative[]>([]);
@@ -91,31 +130,10 @@ export default function Dashboard() {
     : 0;
 
   // Rank narratives by total article count across timeline points (most dominant first)
-  const rankedLabels = useMemo(() => {
-    const labelTotals = new Map<string, { count: number; ids: Set<number> }>();
-    timeline
-      .filter((d) => d.label !== "Other")
-      .forEach((d) => {
-        const entry = labelTotals.get(d.label) || { count: 0, ids: new Set<number>() };
-        entry.count += d.article_count;
-        entry.ids.add(d.narrative_id);
-        labelTotals.set(d.label, entry);
-      });
-    const MAX_NARRATIVES = 10;
-    const narrativeIds = new Set(narratives.map((n) => n.id));
-    return [...labelTotals.entries()]
-      .sort((a, b) => b[1].count - a[1].count)
-      .filter(([, entry]) => [...entry.ids].some((id) => narrativeIds.has(id)))
-      .slice(0, MAX_NARRATIVES)
-      .map(([label, entry]) => ({ label, ids: entry.ids }));
-  }, [timeline, narratives]);
+  const rankedLabels = useMemo(() => getRankedLabels(narratives, timeline), [narratives, timeline]);
 
   const [hiddenLabels, setHiddenLabels] = useState<Set<string>>(new Set());
-
-  // Reset when available narratives change
-  useEffect(() => {
-    setHiddenLabels(new Set());
-  }, [rankedLabels.length]);
+  const previousRankedLabelCountRef = useRef(0);
 
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -211,30 +229,8 @@ export default function Dashboard() {
     return [...visible, ...otherRows];
   }, [timeline, visibleLabels, hiddenLabels, mode]);
 
-  // Stable color registry: once a label gets a color, it keeps it for the session
-  const stableColorRef = useRef<Record<string, string>>({});
-
-  const colorMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    const usedColors = new Set(Object.values(stableColorRef.current));
-
-    rankedLabels.forEach((r) => {
-      if (stableColorRef.current[r.label]) {
-        map[r.label] = stableColorRef.current[r.label];
-      } else {
-        let colorIdx = 0;
-        while (usedColors.has(NARRATIVE_PALETTE[colorIdx % NARRATIVE_PALETTE.length]) && colorIdx < NARRATIVE_PALETTE.length) {
-          colorIdx++;
-        }
-        const color = NARRATIVE_PALETTE[colorIdx % NARRATIVE_PALETTE.length];
-        map[r.label] = color;
-        stableColorRef.current[r.label] = color;
-        usedColors.add(color);
-      }
-    });
-
-    return map;
-  }, [rankedLabels]);
+  // Stable color registry: once a label gets a color, it keeps it for the session.
+  const [colorMap, setColorMap] = useState<Record<string, string>>({});
 
   // Filter covers to current time range
   const visibleCovers = (() => {
@@ -252,8 +248,14 @@ export default function Dashboard() {
     try {
       const params = getTimeRangeParams(timeRange);
       const [n, t] = await Promise.all([fetchNarratives(), fetchTimeline(params)]);
+      const nextRankedLabels = getRankedLabels(n, t);
       setNarratives(n);
       setTimeline(t);
+      setColorMap((previousColors) => assignNarrativeColors(nextRankedLabels, previousColors));
+      if (nextRankedLabels.length !== previousRankedLabelCountRef.current) {
+        setHiddenLabels(new Set());
+      }
+      previousRankedLabelCountRef.current = nextRankedLabels.length;
     } catch (e) {
       console.error("Failed to load data:", e);
       setError("Failed to load dashboard data. Is the API running?");
@@ -262,7 +264,10 @@ export default function Dashboard() {
   }, [timeRange]);
 
   useEffect(() => {
-    loadData();
+    async function load() {
+      await loadData();
+    }
+    void load();
   }, [loadData]);
 
   // Fetch all covers when toggle is turned on

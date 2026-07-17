@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import Image from "next/image";
+import { useRef, useEffect, useState, useMemo } from "react";
 import { TimelinePoint, Cover, coverImageUrl } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 
@@ -104,7 +105,7 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
   }, [filtered]);
 
   // Compute date range from the actual data
-  const { minDate, maxDate, dateSpan } = useMemo(() => {
+  const { minDate, dateSpan } = useMemo(() => {
     const allDates = filtered.map((d) => new Date(d.week_start).getTime());
     const min = Math.min(...allDates);
     const max = Math.max(...allDates);
@@ -181,7 +182,8 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
   };
 
   const { traces, layout } = useMemo(() => {
-    let t: any[];
+    // Plotly's installed types omit the supported "points+fills" hover mode.
+    let t: Plotly.Data[];
     let l: Partial<Plotly.Layout>;
 
     if (mode === "attention") {
@@ -212,7 +214,7 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
           stackgroup: "one",
           line: { width: 0, shape: "spline" as const, smoothing: 1.3 },
           fillcolor: color + (isOther ? "88" : "cc"),
-          hoveron: "points+fills" as const,
+          hoveron: "points+fills" as unknown as Plotly.PlotData["hoveron"],
           hovertemplate: `%{fullData.name} %{y:.1f}%<extra></extra>`,
           hoverlabel: { bgcolor: isDark ? "#1c1917" : "#ffffff", font: { color: isDark ? "#f5f0eb" : "#1a1a1a" } },
         };
@@ -327,12 +329,13 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
                       cursor: "pointer",
                     }}
                   >
-                    <img
+                    <Image
                       src={coverImageUrl(cover.image_url, true)}
                       alt={`Economist ${cover.date}`}
                       width={THUMB_W}
                       height={THUMB_H}
                       loading="lazy"
+                      unoptimized
                       onLoad={() => setLoadedCovers(prev => { const next = new Set(prev); next.add(cover.id); return next; })}
                       style={{
                         display: "block",

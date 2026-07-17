@@ -107,7 +107,6 @@ export default function ArisingTab() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
     fetchArising()
       .then(setData)
       .catch(() => setError("Failed to load arising data."))

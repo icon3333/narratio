@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { fetchArticles, fetchSources, Article, ArticlesResponse } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { fetchArticles, fetchSources, ArticlesResponse } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { Th, Td } from "@/components/Table";
+import { shouldStartSearchLoading } from "./articlesSearch.mjs";
 
 export default function ArticlesTab() {
   const [data, setData] = useState<ArticlesResponse | null>(null);
@@ -15,26 +16,24 @@ export default function ArticlesTab() {
   const [sources, setSources] = useState<string[]>([]);
   const [searchInput, setSearchInput] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchArticles({
-        page,
-        per_page: 50,
-        source: source || undefined,
-        search: search || undefined,
-      });
-      setData(res);
-    } catch {
-      setError("Failed to load articles.");
-    }
-    setLoading(false);
-  }, [page, search, source]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    async function load() {
+      setError(null);
+      try {
+        const res = await fetchArticles({
+          page,
+          per_page: 50,
+          source: source || undefined,
+          search: search || undefined,
+        });
+        setData(res);
+      } catch {
+        setError("Failed to load articles.");
+      }
+      setLoading(false);
+    }
+    void load();
+  }, [page, search, source]);
 
   // Fetch available sources from dedicated endpoint on mount
   useEffect(() => {
@@ -43,6 +42,8 @@ export default function ArticlesTab() {
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
+    if (!shouldStartSearchLoading(page, search, searchInput)) return;
+    setLoading(true);
     setPage(1);
     setSearch(searchInput);
   }
@@ -81,6 +82,7 @@ export default function ArticlesTab() {
           <select
             value={source}
             onChange={(e) => {
+              setLoading(true);
               setSource(e.target.value);
               setPage(1);
             }}
@@ -178,13 +180,13 @@ export default function ArticlesTab() {
 
             {totalPages > 1 && (
               <div className="pagination">
-                <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
+                <button disabled={page <= 1} onClick={() => { setLoading(true); setPage(page - 1); }}>
                   Prev
                 </button>
                 <span>
                   Page {page} of {totalPages}
                 </span>
-                <button disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+                <button disabled={page >= totalPages} onClick={() => { setLoading(true); setPage(page + 1); }}>
                   Next
                 </button>
               </div>
@@ -206,4 +208,3 @@ export default function ArticlesTab() {
     </div>
   );
 }
-

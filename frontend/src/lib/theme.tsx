@@ -30,9 +30,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // Read actual theme from DOM after mount (set by inline script in layout)
   useEffect(() => {
-    const actual = (document.documentElement.getAttribute("data-theme") as Theme) || "light";
-    setThemeState(actual);
-    setMounted(true);
+    const frame = requestAnimationFrame(() => {
+      const actual = (document.documentElement.getAttribute("data-theme") as Theme) || "light";
+      setThemeState(actual);
+      setMounted(true);
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   // Sync with system preference changes (only when no manual override)
