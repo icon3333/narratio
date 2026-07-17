@@ -130,8 +130,6 @@ uv run narratio                                # Full pipeline (current month)
 python narratio/backfill.py --start 2025-01    # Backfill historical data
 uv run uvicorn narratio.api:app --reload       # API server
 cd frontend && npm run dev                     # Frontend dev server
-uv run pytest                                  # Run tests
-uv run pytest tests/test_cluster.py -k test_name  # Single test
 ```
 
 ## Feedback & Contributing

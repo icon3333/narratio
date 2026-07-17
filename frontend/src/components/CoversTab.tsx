@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { fetchCovers, refreshCovers, coverImageUrl, Cover, CoversResponse } from "@/lib/api";
+import Image from "next/image";
+import { useEffect, useState } from "react";
+import { fetchCovers, refreshCovers, coverImageUrl, Cover } from "@/lib/api";
 import { formatDateUK } from "@/lib/format";
 
 function SkeletonGrid() {
@@ -26,25 +27,23 @@ export default function CoversTab() {
   const [selectedCover, setSelectedCover] = useState<Cover | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadCovers = useCallback(async (year?: number) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetchCovers(year);
-      setCovers(res.covers);
-      if (res.years.length > 0) {
-        setYears(res.years);
-      }
-    } catch (e) {
-      console.error("Failed to load covers:", e);
-      setError("Failed to load covers. Is the API running?");
-    }
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
-    loadCovers(selectedYear);
-  }, [selectedYear, loadCovers]);
+    async function loadCovers() {
+      setError(null);
+      try {
+        const res = await fetchCovers(selectedYear);
+        setCovers(res.covers);
+        if (res.years.length > 0) {
+          setYears(res.years);
+        }
+      } catch (e) {
+        console.error("Failed to load covers:", e);
+        setError("Failed to load covers. Is the API running?");
+      }
+      setLoading(false);
+    }
+    void loadCovers();
+  }, [selectedYear]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -52,7 +51,20 @@ export default function CoversTab() {
       await refreshCovers(selectedYear);
       // Poll briefly then reload
       await new Promise((r) => setTimeout(r, 3000));
-      await loadCovers(selectedYear);
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetchCovers(selectedYear);
+        setCovers(res.covers);
+        if (res.years.length > 0) {
+          setYears(res.years);
+        }
+      } catch (e) {
+        console.error("Failed to load covers:", e);
+        setError("Failed to load covers. Is the API running?");
+      } finally {
+        setLoading(false);
+      }
     } catch (e) {
       console.error("Refresh failed:", e);
     }
@@ -82,7 +94,10 @@ export default function CoversTab() {
           {years.length > 0 && (
             <select
               value={selectedYear ?? ""}
-              onChange={(e) => setSelectedYear(e.target.value ? Number(e.target.value) : undefined)}
+              onChange={(e) => {
+                setLoading(true);
+                setSelectedYear(e.target.value ? Number(e.target.value) : undefined);
+              }}
             >
               <option value="">All Years</option>
               {years.map((y) => (
@@ -170,10 +185,13 @@ export default function CoversTab() {
               className="cover-card"
               onClick={() => handleCardClick(cover)}
             >
-              <img
+              <Image
                 src={coverImageUrl(cover.image_url, true)}
                 alt={cover.title || `Economist cover ${cover.date}`}
+                width={510}
+                height={660}
                 loading="lazy"
+                unoptimized
               />
               <div className="cover-info">
                 <span className="cover-date">{formatDateUK(cover.date)}</span>
@@ -204,9 +222,12 @@ export default function CoversTab() {
         <>
           <div className="cover-backdrop" onClick={() => setSelectedCover(null)} />
           <div className="cover-modal" onClick={() => setSelectedCover(null)}>
-            <img
+            <Image
               src={coverImageUrl(selectedCover.image_url)}
               alt={selectedCover.title || `Economist cover ${selectedCover.date}`}
+              width={510}
+              height={660}
+              unoptimized
             />
             <div className="cover-modal-info">
               <span>{formatDateUK(selectedCover.date)}</span>

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchMapData, fetchDateRange, MapCountry, DateRange } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 
@@ -10,6 +10,10 @@ const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 type FilterMode = "all" | "year" | "month" | "custom";
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MAP_COLORS = {
+  light: { red: "#E3120B", text: "#1a1a1a" },
+  dark: { red: "#ef4444", text: "#f5f0eb" },
+};
 
 function MonthPicker({
   value,
@@ -34,11 +38,6 @@ function MonthPicker({
   // Current display year for the grid
   const parsedYear = value ? parseInt(value.slice(0, 4)) : (maxYM?.y ?? new Date().getFullYear());
   const [displayYear, setDisplayYear] = useState(parsedYear);
-
-  // Sync display year when value changes
-  useEffect(() => {
-    if (value) setDisplayYear(parseInt(value.slice(0, 4)));
-  }, [value]);
 
   // Close on outside click
   useEffect(() => {
@@ -260,22 +259,21 @@ export default function MapTab() {
   }, []);
 
   // Fetch map data when filters change
-  const loadData = useCallback(async () => {
-    if (!hasLoaded.current) setLoading(true);
-    setError(null);
-    try {
-      const result = await fetchMapData(filterParams);
-      setData(result);
-      hasLoaded.current = true;
-    } catch {
-      setError("Failed to load map data. Is the API running?");
-    }
-    setLoading(false);
-  }, [filterParams]);
-
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    async function loadData() {
+      if (!hasLoaded.current) setLoading(true);
+      setError(null);
+      try {
+        const result = await fetchMapData(filterParams);
+        setData(result);
+        hasLoaded.current = true;
+      } catch {
+        setError("Failed to load map data. Is the API running?");
+      }
+      setLoading(false);
+    }
+    void loadData();
+  }, [filterParams]);
 
   const handleYearClick = (year: number) => {
     if (selectedYear === year && filterMode === "year") {
@@ -317,22 +315,8 @@ export default function MapTab() {
     }
   };
 
-  // Read CSS vars for theming
-  const cssVarRef = useRef<{ red: string; bg: string; land: string; border: string; text: string }>({
-    red: "#E3120B", bg: "#ffffff", land: "#f5f0eb", border: "#d4d0cc", text: "#1a1a1a",
-  });
-  useEffect(() => {
-    const s = getComputedStyle(document.documentElement);
-    cssVarRef.current = {
-      red: s.getPropertyValue("--red").trim() || "#E3120B",
-      bg: s.getPropertyValue("--bg-page").trim() || "#ffffff",
-      land: s.getPropertyValue("--bg-card").trim() || "#f5f0eb",
-      border: s.getPropertyValue("--border").trim() || "#d4d0cc",
-      text: s.getPropertyValue("--text-primary").trim() || "#1a1a1a",
-    };
-  }, [theme]);
-
   const isDark = theme === "dark";
+  const mapColors = MAP_COLORS[isDark ? "dark" : "light"];
 
   // Build Plotly data
   const plotData = useMemo(() => {
@@ -354,7 +338,7 @@ export default function MapTab() {
         (narrs ? `<br>Top narratives:<br>${narrs}` : "");
     });
 
-    const { red } = cssVarRef.current;
+    const { red } = mapColors;
     // Parse hex to RGB for gradient
     const r = parseInt(red.slice(1, 3), 16);
     const g = parseInt(red.slice(3, 5), 16);
@@ -376,8 +360,8 @@ export default function MapTab() {
       ],
       showscale: true,
       colorbar: {
-        title: { text: "Articles", font: { family: "var(--font-sans)", size: 11, color: cssVarRef.current.text } },
-        tickfont: { family: "var(--font-sans)", size: 10, color: cssVarRef.current.text },
+        title: { text: "Articles", font: { family: "var(--font-sans)", size: 11, color: mapColors.text } },
+        tickfont: { family: "var(--font-sans)", size: 10, color: mapColors.text },
         thickness: 12,
         len: 0.5,
         bgcolor: "transparent",
@@ -390,7 +374,7 @@ export default function MapTab() {
         },
       },
     }];
-  }, [data, isDark, theme]);
+  }, [data, isDark, mapColors]);
 
   const plotLayout = useMemo(() => ({
     geo: {
@@ -415,7 +399,7 @@ export default function MapTab() {
     plot_bgcolor: "transparent",
     dragmode: false as const,
     height: 480,
-  }), [isDark, theme]);
+  }), [isDark]);
 
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
