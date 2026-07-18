@@ -36,6 +36,9 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --locked
 
+      - name: Test backend
+        run: uv run pytest
+
       - name: Smoke test backend imports
         run: uv run python -c "import narratio.api, narratio.pipeline"
 
