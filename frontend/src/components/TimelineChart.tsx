@@ -214,7 +214,7 @@ export default function TimelineChart({ data, mode, covers, colorMap }: Props) {
           stackgroup: "one",
           line: { width: 0, shape: "spline" as const, smoothing: 1.3 },
           fillcolor: color + (isOther ? "88" : "cc"),
-          hoveron: "points+fills" as unknown as Plotly.PlotData["hoveron"],
+          hoveron: "points+fills" as const,
           hovertemplate: `%{fullData.name} %{y:.1f}%<extra></extra>`,
           hoverlabel: { bgcolor: isDark ? "#1c1917" : "#ffffff", font: { color: isDark ? "#f5f0eb" : "#1a1a1a" } },
         };

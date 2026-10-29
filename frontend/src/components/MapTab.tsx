@@ -376,7 +376,7 @@ export default function MapTab() {
     }];
   }, [data, isDark, mapColors]);
 
-  const plotLayout = useMemo(() => ({
+  const plotLayout = useMemo<Partial<Plotly.Layout>>(() => ({
     geo: {
       showframe: false,
       showcoastlines: true,
