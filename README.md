@@ -2,9 +2,9 @@
 
 # Narratio
 
-**What stories are markets telling themselves?**
+**See which stories are taking hold.**
 
-Track which macro stories dominate headlines from The New York Times and The Guardian, and how their share of attention changes week by week.
+Narratio tracks financial coverage from The New York Times and The Guardian so you can spot themes on the rise, see which ones are fading, and read the headlines behind each shift.
 
 [Explore the dashboard](#dashboard) · [Quick start](#quick-start) · [How it works](#how-it-works)
 
@@ -135,5 +135,7 @@ cd frontend && npm run dev                     # Frontend dev server
 ```
 
 ## Feedback
+
+> Built by a vibecoder who doesn't fully know what he's doing. If something looks off, it probably is. Issues, PRs, and unsolicited advice are all genuinely welcome.
 
 Narratio is a side project. If a theme looks mislabeled or a chart doesn’t add up, [open an issue](https://github.com/icon3333/narratio/issues) or send a PR.
