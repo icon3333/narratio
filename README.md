@@ -1,8 +1,6 @@
-# Narratio — What Stories Are Markets Telling Themselves?
+# Narratio
 
-> Built by a vibecoder who doesn't fully know what he's doing. If something looks off, it probably is. Issues, PRs, and unsolicited advice are all genuinely welcome.
-
-Narratio is a financial narrative tracker. It ingests headlines from the New York Times and The Guardian, figures out which macro stories are dominating market attention (think "Fed pivot", "AI bubble", "soft landing"), and tracks how they rise, peak, and fade over time. It's like a radar for the stories that move money — except built by someone who mostly just vibes until things work.
+**See which stories are taking hold.** Narratio tracks financial coverage from The New York Times and The Guardian so you can spot themes on the rise, see which ones are fading, and read the headlines behind each shift.
 
 ## Use Cases
 
@@ -133,6 +131,8 @@ cd frontend && npm run dev                     # Frontend dev server
 ```
 
 ## Feedback & Contributing
+
+> Built by a vibecoder who doesn't fully know what he's doing. If something looks off, it probably is. Issues, PRs, and unsolicited advice are all genuinely welcome.
 
 I'm a vibecoder learning as I go. If you spot something dumb, inefficient, or just plain wrong — please tell me. Open an issue, submit a PR, or just leave a comment. I genuinely learn from every piece of feedback and I won't be precious about it.
 
