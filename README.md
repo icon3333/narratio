@@ -1,17 +1,20 @@
-# Narratio — What Stories Are Markets Telling Themselves?
+<div align="center">
 
-> Built by a vibecoder who doesn't fully know what he's doing. If something looks off, it probably is. Issues, PRs, and unsolicited advice are all genuinely welcome.
+# Narratio
 
-Narratio is a financial narrative tracker. It ingests headlines from the New York Times and The Guardian, figures out which macro stories are dominating market attention (think "Fed pivot", "AI bubble", "soft landing"), and tracks how they rise, peak, and fade over time. It's like a radar for the stories that move money — except built by someone who mostly just vibes until things work.
+**What stories are markets telling themselves?**
 
-## Use Cases
+Track which macro stories dominate headlines from The New York Times and The Guardian, and how their share of attention changes week by week.
 
-- **Macro investors**: See which narratives are overextended or just emerging before consensus catches up
-- **Market watchers**: Track how the media narrative around a theme shifts week to week
-- **Contrarian thinkers**: Spot when everyone is talking about the same thing (that's usually when it stops working)
-- **Curious people**: Honestly it's just interesting to see what the financial press obsesses over
+[Explore the dashboard](#dashboard) · [Quick start](#quick-start) · [How it works](#how-it-works)
 
-## Quick Start
+![Narratio timeline showing weekly shares of headline attention, with Economist covers pinned along the chart.](docs/screenshots/history.png)
+
+<sub>Timeline view: each band shows a story’s share of headline attention, not a market return.</sub>
+
+</div>
+
+## Quick start
 
 You'll need Python 3.12+, Node.js 20.9+, and three API keys:
 - [NYT Archive API](https://developer.nytimes.com/)
@@ -41,25 +44,22 @@ cd frontend && npm run dev
 
 Open **http://localhost:3000** and you should see the dashboard.
 
-**Pro tip:** The first run takes a while because it's embedding thousands of headlines. Subsequent runs are faster since only new articles get processed.
+The first run embeds thousands of headlines. Later runs reuse those embeddings.
 
-## Features
+## Dashboard
 
-- **Automatic narrative discovery** — no predefined categories, stories emerge from clustering
-- **Timeline visualization** — 100% stacked area chart showing share of attention over time
-- **Z-score anomaly detection** — spot unusual spikes relative to a narrative's baseline
-- **Sentiment tracking** — is the mood around "AI bubble" getting more bearish?
-- **Emerging narratives tab** — catch new themes before they become consensus
-- **Economist covers gallery** — visual timeline of magazine covers with zoom
-- **Articles browser** — search and filter the full headline database
-- **REST API** — query everything programmatically
-- **Backfill** — ingest historical data going back months
+| View | What to look for |
+| :--- | :--- |
+| **Timeline** | Compare each narrative’s weekly share of attention. Clustering discovers themes without preset categories. |
+| **Arising** | Find emerging themes and unusual spikes relative to each story’s own baseline. |
+| **Articles** | Search and filter the headlines behind the analysis. |
+| **Covers** | Browse and zoom into Economist covers along the timeline. |
+| **Stats** | Review coverage and which narratives rank highest by significance, momentum, or longevity. |
 
-## Screenshots
+Narratio also scores sentiment. Use the REST API to query the data or backfill older headlines to extend the timeline.
 
-### Timeline — Share of Attention
-![Timeline view](docs/screenshots/history.png)
-The main view: a stacked area chart tracking how much attention each narrative commands week by week, with Economist covers pinned along the timeline.
+<details>
+<summary>More dashboard screenshots</summary>
 
 ### Arising Narratives
 ![Arising narratives](docs/screenshots/arising.png)
@@ -77,7 +77,9 @@ A visual timeline of Economist magazine covers — click to zoom.
 ![Stats dashboard](docs/screenshots/stats.png)
 High-level dashboard metrics: total articles, active narratives, date range, noise ratio, plus leaderboards for significance, momentum, and longevity.
 
-## How It Works
+</details>
+
+## How it works
 
 The pipeline runs in roughly this order:
 
@@ -132,8 +134,6 @@ uv run uvicorn narratio.api:app --reload       # API server
 cd frontend && npm run dev                     # Frontend dev server
 ```
 
-## Feedback & Contributing
+## Feedback
 
-I'm a vibecoder learning as I go. If you spot something dumb, inefficient, or just plain wrong — please tell me. Open an issue, submit a PR, or just leave a comment. I genuinely learn from every piece of feedback and I won't be precious about it.
-
-This is a side project built for curiosity and learning. If you find it useful or have ideas for making it better, I'd love to hear from you.
+Narratio is a side project. If a theme looks mislabeled or a chart doesn’t add up, [open an issue](https://github.com/icon3333/narratio/issues) or send a PR.
